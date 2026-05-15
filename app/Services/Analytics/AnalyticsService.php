@@ -4,8 +4,10 @@ namespace App\Services\Analytics;
 
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
+use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -39,7 +41,7 @@ class AnalyticsService
     public function forAffiliate(Professional $affiliate): array
     {
         return $this->cacheLock->rememberLocked(
-            'analytics:affiliate:'.$affiliate->id,
+            $this->versionedCacheKey('affiliate', $affiliate->id),
             300,
             fn () => $this->computeAffiliate($affiliate),
         );
@@ -51,10 +53,27 @@ class AnalyticsService
     public function forBrand(Professional $brand): array
     {
         return $this->cacheLock->rememberLocked(
-            'analytics:brand:'.$brand->id,
+            $this->versionedCacheKey('brand', $brand->id),
             300,
             fn () => $this->computeBrand($brand),
         );
+    }
+
+    /**
+     * Build a versioned cache key — embeds the AnalyticsCacheService version counter so
+     * any event ingest (pageview/click/cartEvent/sectionSeen) that calls
+     * invalidateAnalytics() automatically makes this key unreachable. New writes land in
+     * fresh keys with the bumped version, stale keys time out on their own 5min TTL.
+     *
+     * Trade-off: a brand's stats don't auto-bust on an affiliate's event (affiliate's
+     * version bumps, brand's doesn't). Brand stats then lag up to 5min after affiliate
+     * activity — acceptable per the locked decision that "analytics tolerates 5min lag".
+     */
+    private function versionedCacheKey(string $role, string $professionalId): string
+    {
+        $version = Cache::get(CacheKeyGenerator::analyticsSummaryVersion($professionalId), 0);
+
+        return "analytics:{$role}:{$professionalId}:v{$version}";
     }
 
     private function computeAffiliate(Professional $affiliate): array
@@ -478,22 +497,33 @@ class AnalyticsService
     }
 
     /**
-     * Per-platform link clicks — bucketed via utm_source normalizer.
+     * Per-platform OUTBOUND link clicks — counts clicks ON the affiliate's storefront
+     * link buttons grouped by destination platform (Instagram, TikTok, etc.). Inbound
+     * attribution (where the visitor came FROM) lives on `top_referrers`, not here.
+     *
+     * Resolves the platform from each block's icon_key first (explicit marker the site
+     * editor set), falling back to the destination URL's host. Anything unrecognised
+     * goes to 'Other'.
      *
      * @return array<int, array{platform: string, clicks: int}>
      */
     private function affiliatePerPlatformClicks(string $affiliateId): array
     {
-        $rows = DB::table('analytics.link_clicks')
-            ->where('professional_id', $affiliateId)
-            ->selectRaw("LOWER(COALESCE(NULLIF(utm_source, ''), 'direct')) AS source, COUNT(*) AS clicks")
-            ->groupBy('source')
-            ->get();
+        $rows = DB::select('
+            SELECT b.icon_key, b.url, COUNT(*) AS clicks
+            FROM analytics.link_clicks lc
+            INNER JOIN site.blocks b ON b.id = lc.link_block_id
+            WHERE lc.professional_id = ?
+              AND b.block_group = ?
+            GROUP BY b.icon_key, b.url
+        ', [$affiliateId, 'links']);
 
-        // Normalise the raw utm_source into a small set of platforms.
         $buckets = [];
         foreach ($rows as $r) {
-            $platform = $this->normalisePlatform((string) $r->source);
+            $platform = $this->normaliseOutboundPlatform(
+                isset($r->icon_key) ? (string) $r->icon_key : null,
+                isset($r->url) ? (string) $r->url : null,
+            );
             $buckets[$platform] = ($buckets[$platform] ?? 0) + (int) $r->clicks;
         }
         arsort($buckets);
@@ -505,38 +535,77 @@ class AnalyticsService
         ), 0, 5);
     }
 
-    private function normalisePlatform(string $source): string
+    /**
+     * Resolve a destination platform from a link block's icon_key (preferred) or URL host.
+     * Returns 'Other' when neither signal matches a known platform.
+     */
+    private function normaliseOutboundPlatform(?string $iconKey, ?string $url): string
     {
-        $s = strtolower(trim($source));
-        if ($s === '' || $s === 'direct') {
-            return 'Direct';
-        }
-        if (str_contains($s, 'instagram') || $s === 'ig') {
-            return 'Instagram';
-        }
-        if (str_contains($s, 'tiktok')) {
-            return 'TikTok';
-        }
-        if (str_contains($s, 'facebook') || $s === 'fb' || str_contains($s, 'meta')) {
-            return 'Facebook';
-        }
-        if (str_contains($s, 'twitter') || $s === 'x' || str_contains($s, 'x.com')) {
-            return 'X (Twitter)';
-        }
-        if (str_contains($s, 'youtube') || $s === 'yt') {
-            return 'YouTube';
-        }
-        if (str_contains($s, 'pinterest')) {
-            return 'Pinterest';
-        }
-        if (str_contains($s, 'linkedin')) {
-            return 'LinkedIn';
-        }
-        if (str_contains($s, 'snapchat') || $s === 'snap') {
-            return 'Snapchat';
+        $key = strtolower(trim((string) ($iconKey ?? '')));
+        $platform = $this->platformFromToken($key);
+        if ($platform !== null) {
+            return $platform;
         }
 
-        return 'Other';
+        $href = trim((string) ($url ?? ''));
+        if ($href === '') {
+            return 'Other';
+        }
+        $host = parse_url($href, PHP_URL_HOST);
+        if (! is_string($host) || $host === '') {
+            return 'Other';
+        }
+
+        return $this->platformFromToken(strtolower($host)) ?? 'Other';
+    }
+
+    /**
+     * Map a token (icon_key or URL host) to a canonical platform label. Returns null
+     * when no match — callers fall back to 'Other'.
+     */
+    private function platformFromToken(string $token): ?string
+    {
+        if ($token === '') {
+            return null;
+        }
+        if (str_contains($token, 'instagram')) {
+            return 'Instagram';
+        }
+        if (str_contains($token, 'tiktok')) {
+            return 'TikTok';
+        }
+        if (str_contains($token, 'facebook') || $token === 'fb' || str_contains($token, 'meta')) {
+            return 'Facebook';
+        }
+        if (str_contains($token, 'twitter') || $token === 'x.com' || $token === 'x' || str_contains($token, 't.co')) {
+            return 'X (Twitter)';
+        }
+        if (str_contains($token, 'youtube') || str_contains($token, 'youtu.be') || $token === 'yt') {
+            return 'YouTube';
+        }
+        if (str_contains($token, 'pinterest')) {
+            return 'Pinterest';
+        }
+        if (str_contains($token, 'linkedin')) {
+            return 'LinkedIn';
+        }
+        if (str_contains($token, 'snapchat') || $token === 'snap') {
+            return 'Snapchat';
+        }
+        if (str_contains($token, 'spotify')) {
+            return 'Spotify';
+        }
+        if (str_contains($token, 'whatsapp') || $token === 'wa') {
+            return 'WhatsApp';
+        }
+        if (str_contains($token, 'telegram')) {
+            return 'Telegram';
+        }
+        if (str_contains($token, 'threads')) {
+            return 'Threads';
+        }
+
+        return null;
     }
 
     /**

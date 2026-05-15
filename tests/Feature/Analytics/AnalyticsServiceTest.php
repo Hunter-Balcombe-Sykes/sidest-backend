@@ -301,32 +301,53 @@ it('forBrand returns total_orders + top_affiliates across affiliates', function 
     expect($payload['top_affiliates'][0]['gross_cents'])->toBe(30000);
 });
 
-it('per_platform_clicks normalises utm_source into platform buckets', function () {
+it('per_platform_clicks groups by OUTBOUND destination from site.blocks.icon_key + url', function () {
     $aff = stats_seedPro('stats-aff-plat', 'influencer', 'AffPlat');
+    $siteId = (string) Str::uuid();
 
-    // Seed link_clicks with various utm_source values
-    foreach (['instagram', 'instagram.com', 'IG', 'tiktok', null] as $i => $source) {
-        DB::connection('pgsql')->table('analytics.link_clicks')->insert([
-            'id' => (string) Str::uuid(),
+    $blocks = [
+        ['icon_key' => 'instagram', 'url' => 'https://instagram.com/affiliate', 'clicks' => 3],
+        ['icon_key' => 'tiktok', 'url' => 'https://tiktok.com/@affiliate', 'clicks' => 2],
+        ['icon_key' => null, 'url' => 'https://youtube.com/@affiliate', 'clicks' => 1],
+    ];
+
+    foreach ($blocks as $b) {
+        $blockId = (string) Str::uuid();
+        DB::connection('pgsql')->table('site.blocks')->insert([
+            'id' => $blockId,
             'professional_id' => $aff->id,
-            'site_id' => (string) Str::uuid(),
-            'link_block_id' => (string) Str::uuid(),
-            'occurred_at' => now()->subHours(1)->toDateTimeString(),
-            'session_id' => (string) Str::uuid(),
-            'visitor_id' => (string) Str::uuid(),
-            'utm_source' => $source,
-            'created_at' => now()->subHours(1)->toDateTimeString(),
+            'site_id' => $siteId,
+            'block_type' => 'link',
+            'block_group' => 'links',
+            'icon_key' => $b['icon_key'],
+            'url' => $b['url'],
         ]);
+
+        for ($i = 0; $i < $b['clicks']; $i++) {
+            DB::connection('pgsql')->table('analytics.link_clicks')->insert([
+                'id' => (string) Str::uuid(),
+                'professional_id' => $aff->id,
+                'site_id' => $siteId,
+                'link_block_id' => $blockId,
+                'occurred_at' => now()->subHours(1)->toDateTimeString(),
+                'session_id' => (string) Str::uuid(),
+                'visitor_id' => (string) Str::uuid(),
+                'created_at' => now()->subHours(1)->toDateTimeString(),
+            ]);
+        }
     }
 
     $payload = stats_makeService()->forAffiliate($aff);
     $platforms = collect($payload['per_platform_clicks']);
 
-    // 3 Instagram (instagram, instagram.com, IG), 1 TikTok, 1 Direct (null)
     $instagram = $platforms->firstWhere('platform', 'Instagram');
     expect($instagram)->not->toBeNull();
     expect($instagram['clicks'])->toBe(3);
 
     $tiktok = $platforms->firstWhere('platform', 'TikTok');
-    expect($tiktok['clicks'])->toBe(1);
+    expect($tiktok['clicks'])->toBe(2);
+
+    // YouTube resolved via URL host since icon_key was null.
+    $youtube = $platforms->firstWhere('platform', 'YouTube');
+    expect($youtube['clicks'])->toBe(1);
 });
