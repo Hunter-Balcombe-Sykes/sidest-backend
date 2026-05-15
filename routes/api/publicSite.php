@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
 use App\Http\Controllers\Api\PublicSite\PublicCustomerLeadController;
 use App\Http\Controllers\Api\PublicSite\PublicEmailSubscriptionController;
@@ -36,13 +35,10 @@ Route::group([
             ->middleware('throttle:booking-checkout');
     });
 
-    // Page View Analytics
-    Route::post('/analytics/pageviews', [AnalyticsController::class, 'pageview'])
-        ->middleware('throttle:analytics');
-
-    // Click Analytics
-    Route::post('/analytics/clicks', [AnalyticsController::class, 'click'])
-        ->middleware(['throttle:analytics', 'throttle:analytics-click']);
+    // Analytics routes moved to the top-level group in routes/api.php (api host has no
+    // site-subdomain to capture; Hydrogen storefronts proxy to dev-api.partna.au, which
+    // the {subdomain}.partna.au pattern greedy-matched as subdomain=dev-api, overwriting
+    // the payload subdomain in ResolvesPublicSiteSubdomain and 404'ing the site lookup).
 
     // Customer Leads
     Route::post('/customers', [PublicCustomerLeadController::class, 'store'])
