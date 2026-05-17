@@ -244,3 +244,261 @@ it('flags the payout for manual refund when the Refund call fails', function () 
 
     expect($payout->fresh()->needs_manual_refund)->toBeTrue();
 });
+
+// ─── SCALE-1: Stripe HTTP must never run inside a DB transaction ────────────
+//
+// Holding a FOR UPDATE row lock across a Stripe network call was the audited
+// risk: under Stripe latency two concurrent refund webhooks would pile up
+// behind the lock and exhaust the connection pool. These tests pin the fix.
+
+it('SCALE-1: Stripe refunds->create is invoked with no DB transaction open', function () {
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'completed',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 2000,
+        'net_payout_cents' => 8000,
+        'currency_code' => 'AUD',
+        'payment_intent_id' => 'pi_test_no_txn',
+        'processed_at' => now(),
+    ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
+
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'gross_cents' => 5000,
+        'commission_cents' => 5000,
+        'refund_cents' => 2500,
+        'status' => 'partially_refunded',
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+
+    CommissionPayoutItem::factory()->create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 5000,
+    ]);
+
+    $observedLevel = null;
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
+
+    $refunds->shouldReceive('create')
+        ->once()
+        ->andReturnUsing(function () use (&$observedLevel) {
+            $observedLevel = DB::transactionLevel();
+
+            return (object) ['id' => 're_no_txn'];
+        });
+
+    $service = new CommissionPayoutRefundService(
+        app(AnalyticsCacheService::class),
+        $stripe,
+    );
+
+    $service->handleOrderRefund($order, 2500, 'rf_no_txn');
+
+    expect($observedLevel)->toBe(0);
+});
+
+it('SCALE-1: Stripe call still escapes when handleOrderRefund runs inside an outer transaction', function () {
+    // The webhook job wraps order-row update + handleOrderRefund in one outer
+    // transaction. Postgres holds SELECT FOR UPDATE locks until the outermost
+    // COMMIT, so an inner DB::transaction split alone wouldn't release them.
+    // The service must defer the Stripe HTTP call (e.g. via DB::afterCommit)
+    // so the network call lands AFTER the outer commit.
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'completed',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 2000,
+        'net_payout_cents' => 8000,
+        'currency_code' => 'AUD',
+        'payment_intent_id' => 'pi_test_outer_txn',
+        'processed_at' => now(),
+    ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
+
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'gross_cents' => 5000,
+        'commission_cents' => 5000,
+        'refund_cents' => 5000,
+        'status' => 'refunded',
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+
+    CommissionPayoutItem::factory()->create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 5000,
+    ]);
+
+    $observedLevel = null;
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
+
+    $refunds->shouldReceive('create')
+        ->once()
+        ->andReturnUsing(function () use (&$observedLevel) {
+            $observedLevel = DB::transactionLevel();
+
+            return (object) ['id' => 're_outer_txn'];
+        });
+
+    $service = new CommissionPayoutRefundService(
+        app(AnalyticsCacheService::class),
+        $stripe,
+    );
+
+    DB::transaction(function () use ($service, $order) {
+        $service->handleOrderRefund($order, 5000, 'rf_outer_txn');
+    });
+
+    expect($observedLevel)->toBe(0);
+
+    // Clawback row still ends up written after the Stripe call settles.
+    $clawback = CommissionClawback::query()
+        ->where('payout_id', $payout->id)
+        ->where('order_id', $order->id)
+        ->first();
+
+    expect($clawback)->not->toBeNull()
+        ->and($clawback->status)->toBe('reversed');
+});
+
+it('SCALE-1: outer transaction rollback suppresses the Stripe call entirely', function () {
+    // DB::afterCommit semantics: if the outermost transaction rolls back, the
+    // deferred callback never runs. This is the correct behaviour — if the
+    // caller's transaction rolls back, no refund event was actually persisted,
+    // so we must not issue the Stripe Refund.
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'completed',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 2000,
+        'net_payout_cents' => 8000,
+        'currency_code' => 'AUD',
+        'payment_intent_id' => 'pi_test_rollback',
+        'processed_at' => now(),
+    ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
+
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'gross_cents' => 5000,
+        'commission_cents' => 5000,
+        'refund_cents' => 5000,
+        'status' => 'refunded',
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+
+    CommissionPayoutItem::factory()->create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 5000,
+    ]);
+
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
+
+    // Must NEVER be called.
+    $refunds->shouldNotReceive('create');
+
+    $service = new CommissionPayoutRefundService(
+        app(AnalyticsCacheService::class),
+        $stripe,
+    );
+
+    try {
+        DB::transaction(function () use ($service, $order) {
+            $service->handleOrderRefund($order, 5000, 'rf_rollback');
+            throw new \RuntimeException('caller aborts the transaction');
+        });
+    } catch (\RuntimeException) {
+        // expected
+    }
+
+    expect(CommissionClawback::query()
+        ->where('payout_id', $payout->id)
+        ->where('order_id', $order->id)
+        ->exists())->toBeFalse();
+});
+
+it('SCALE-1: failed Stripe call still escapes the outer transaction and flags needs_manual_refund', function () {
+    // Failure-path twin of the previous test: Stripe rejects (e.g. insufficient
+    // balance) — must still happen outside the outer transaction AND the
+    // resulting flag/clawback write must commit.
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'completed',
+        'gross_commission_cents' => 10000,
+        'platform_fee_cents' => 2000,
+        'net_payout_cents' => 8000,
+        'currency_code' => 'AUD',
+        'payment_intent_id' => 'pi_test_outer_failure',
+        'processed_at' => now(),
+        'needs_manual_refund' => false,
+    ]);
+
+    clawbackSeedBrand($payout->brand_professional_id);
+
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'gross_cents' => 5000,
+        'commission_cents' => 5000,
+        'refund_cents' => 5000,
+        'status' => 'refunded',
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+
+    CommissionPayoutItem::factory()->create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 5000,
+    ]);
+
+    $observedLevel = null;
+    $stripe = Mockery::mock(StripeClient::class);
+    $refunds = Mockery::mock();
+    $stripe->refunds = $refunds;
+
+    $stripeError = Mockery::mock(\Stripe\Exception\InvalidRequestException::class);
+    $stripeError->shouldReceive('getStripeCode')->andReturn('insufficient_funds');
+    $stripeError->shouldReceive('getMessage')->andReturn('Insufficient funds');
+
+    $refunds->shouldReceive('create')
+        ->once()
+        ->andReturnUsing(function () use (&$observedLevel, $stripeError) {
+            $observedLevel = DB::transactionLevel();
+
+            throw $stripeError;
+        });
+
+    $service = new CommissionPayoutRefundService(
+        app(AnalyticsCacheService::class),
+        $stripe,
+    );
+
+    DB::transaction(function () use ($service, $order) {
+        $service->handleOrderRefund($order, 5000, 'rf_outer_failure');
+    });
+
+    expect($observedLevel)->toBe(0);
+
+    expect($payout->fresh()->needs_manual_refund)->toBeTrue();
+
+    $clawback = CommissionClawback::query()
+        ->where('payout_id', $payout->id)
+        ->where('order_id', $order->id)
+        ->first();
+
+    expect($clawback)->not->toBeNull()
+        ->and($clawback->status)->toBe('reversal_failed');
+});

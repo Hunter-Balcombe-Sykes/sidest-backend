@@ -69,14 +69,21 @@ class CommissionPayoutRefundService
             return;
         }
 
-        DB::transaction(function () use ($order, $incrementalRefundCents, $shopifyRefundId): void {
+        // SCALE-1: the completed-payout path issues a Stripe Refund. We MUST NOT
+        // hold a FOR UPDATE row lock across that network call (under Stripe latency
+        // two concurrent refund webhooks would pile up behind the lock and exhaust
+        // the connection pool). The transaction below does only local work:
+        // lock + decide + (for non-Stripe paths) mutate. For the completed-payout
+        // case it returns a plan; the Stripe call + clawback-row write run via
+        // DB::afterCommit so they fire AFTER the outermost transaction commits.
+        $clawbackPlan = DB::transaction(function () use ($order, $incrementalRefundCents, $shopifyRefundId): ?array {
             $payout = CommissionPayout::query()
                 ->where('id', $order->payout_id)
                 ->lockForUpdate()
                 ->first();
 
             if (! $payout) {
-                return;
+                return null;
             }
 
             if (in_array($payout->status, ['failed', 'cancelled'], true)) {
@@ -86,19 +93,17 @@ class CommissionPayoutRefundService
                     'status' => $payout->status,
                 ]);
 
-                return;
+                return null;
             }
 
             if ($payout->status === 'completed') {
-                $this->clawbackCompletedPayout($payout, $order, $incrementalRefundCents, $shopifyRefundId);
-
-                return;
+                return $this->buildClawbackPlan($payout, $order, $incrementalRefundCents, $shopifyRefundId);
             }
 
             if ($payout->status === 'processing') {
                 $this->flagMidFlight($payout, $order);
 
-                return;
+                return null;
             }
 
             // status === 'pending' — payout not yet sent to Stripe, just shrink/remove the item.
@@ -113,7 +118,18 @@ class CommissionPayoutRefundService
             $this->analyticsCache->bumpAnalyticsVersion($order->affiliate_professional_id);
             $this->analyticsCache->bumpAnalyticsVersion($order->brand_professional_id);
             Cache::forget(CacheKeyGenerator::affiliatePayoutState($order->affiliate_professional_id));
+
+            return null;
         });
+
+        if ($clawbackPlan === null) {
+            return;
+        }
+
+        // afterCommit fires immediately when no transaction is open, and defers
+        // to the outermost commit when this service is called inside a caller's
+        // transaction — guaranteeing the Stripe HTTP call holds no row locks.
+        DB::afterCommit(fn () => $this->executeClawback($clawbackPlan));
     }
 
     /**
@@ -155,33 +171,40 @@ class CommissionPayoutRefundService
     }
 
     /**
-     * Issue a single atomic Stripe Refund for the affiliate's share of a post-payout refund.
+     * Phase 1 (synchronous, under lock): validate the completed-payout refund and
+     * compute the clawback amount + idempotency key. Returns a plan dict consumed
+     * by executeClawback after the surrounding transaction commits, or null when
+     * the refund should be a no-op (missing PI, missing item, zero share, dedup hit).
      *
-     * Under Option A the original commission charge is a destination charge on the PLATFORM,
-     * so the refund runs platform-scoped (no stripe_account header). refund_application_fee
-     * and reverse_transfer are both true — Stripe proportionally reverses:
-     *   - the application fee from the platform balance
-     *   - the auto-transfer from the affiliate's balance
-     * in one atomic call. If the affiliate balance can't cover the proportional reversal,
-     * Stripe rejects the ENTIRE refund — no half-applied state. We flag needs_manual_refund.
+     * No Stripe I/O happens here — the caller holds the payout row lock for the
+     * duration of this call, so it must remain purely local work.
      *
-     * The refund amount is the brand's customer-facing refund (item.amount_cents proportional
-     * to this refund's share of the order's gross). Stripe handles the fee/transfer ratios
-     * internally — we don't compute them, we just store what we requested + the refund_id.
+     * @return array{
+     *   payout_id: string,
+     *   order_id: string,
+     *   currency_code: string,
+     *   payment_intent_id: string,
+     *   shopify_refund_id: ?string,
+     *   incremental_refund_cents: int,
+     *   refund_cents: int,
+     *   is_partial: bool,
+     *   idempotency_key: string,
+     *   fee_ratio: float
+     * }|null
      */
-    private function clawbackCompletedPayout(
+    private function buildClawbackPlan(
         CommissionPayout $payout,
         Order $order,
         ?int $incrementalRefundCents,
         ?string $shopifyRefundId,
-    ): void {
+    ): ?array {
         if (! $payout->payment_intent_id || $payout->gross_commission_cents <= 0) {
             Log::warning('payout.clawback.no_pi_or_zero_gross', [
                 'payout_id' => $payout->id,
                 'order_id' => $order->id,
             ]);
 
-            return;
+            return null;
         }
 
         $item = CommissionPayoutItem::where('payout_id', $payout->id)
@@ -194,7 +217,7 @@ class CommissionPayoutRefundService
                 'order_id' => $order->id,
             ]);
 
-            return;
+            return null;
         }
 
         if ($incrementalRefundCents === null) {
@@ -207,7 +230,7 @@ class CommissionPayoutRefundService
         }
 
         if ($incrementalRefundCents <= 0 || $order->gross_cents <= 0) {
-            return;
+            return null;
         }
 
         // Dedup pre-check — the DB partial-unique index on (payout_id, order_id, shopify_refund_id)
@@ -226,7 +249,7 @@ class CommissionPayoutRefundService
                     'shopify_refund_id' => $shopifyRefundId,
                 ]);
 
-                return;
+                return null;
             }
         }
 
@@ -239,7 +262,7 @@ class CommissionPayoutRefundService
         $isPartial = $incrementalRefundCents < (int) $order->gross_cents;
 
         if ($refundCents <= 0) {
-            return;
+            return null;
         }
 
         // Deterministic idempotency key — retries return the original Refund. When shopify_refund_id
@@ -248,79 +271,124 @@ class CommissionPayoutRefundService
         $idempotencySalt = $shopifyRefundId ?? "cum:{$order->refund_cents}";
         $idempotencyKey = "rf_{$payout->id}_{$order->id}_".substr(md5($idempotencySalt), 0, 16);
 
+        $feeRatio = $payout->gross_commission_cents > 0
+            ? $payout->platform_fee_cents / $payout->gross_commission_cents
+            : 0.0;
+
+        return [
+            'payout_id' => (string) $payout->id,
+            'order_id' => (string) $order->id,
+            'currency_code' => strtoupper((string) $payout->currency_code),
+            'payment_intent_id' => (string) $payout->payment_intent_id,
+            'shopify_refund_id' => $shopifyRefundId,
+            'incremental_refund_cents' => (int) $incrementalRefundCents,
+            'refund_cents' => $refundCents,
+            'is_partial' => $isPartial,
+            'idempotency_key' => $idempotencyKey,
+            'fee_ratio' => $feeRatio,
+        ];
+    }
+
+    /**
+     * Phase 2 + 3: issue the Stripe Refund and persist the clawback row. Runs via
+     * DB::afterCommit so no DB lock is held across the network call. The follow-up
+     * write happens in its own short transaction.
+     *
+     * Under Option A the original commission charge is a destination charge on the
+     * PLATFORM, so the refund is platform-scoped (no stripe_account header).
+     * refund_application_fee + reverse_transfer are both true — Stripe atomically
+     * reverses the platform fee AND the affiliate transfer. If the affiliate balance
+     * can't cover the proportional reverse_transfer, Stripe rejects the ENTIRE call
+     * — no half-applied state — and we flag needs_manual_refund.
+     *
+     * @param  array{
+     *   payout_id: string,
+     *   order_id: string,
+     *   currency_code: string,
+     *   payment_intent_id: string,
+     *   shopify_refund_id: ?string,
+     *   incremental_refund_cents: int,
+     *   refund_cents: int,
+     *   is_partial: bool,
+     *   idempotency_key: string,
+     *   fee_ratio: float
+     * }  $plan
+     */
+    private function executeClawback(array $plan): void
+    {
         try {
             $refund = $this->stripe->refunds->create([
-                'payment_intent' => $payout->payment_intent_id,
-                'amount' => $refundCents,
+                'payment_intent' => $plan['payment_intent_id'],
+                'amount' => $plan['refund_cents'],
                 'refund_application_fee' => true,
                 'reverse_transfer' => true,
                 'metadata' => [
-                    'sidest_payout_id' => $payout->id,
-                    'sidest_order_id' => $order->id,
+                    'sidest_payout_id' => $plan['payout_id'],
+                    'sidest_order_id' => $plan['order_id'],
                     'sidest_reason' => 'post_payout_refund',
-                    'sidest_refund_share_cents' => $incrementalRefundCents,
-                    'sidest_shopify_refund_id' => $shopifyRefundId ?? '',
+                    'sidest_refund_share_cents' => $plan['incremental_refund_cents'],
+                    'sidest_shopify_refund_id' => $plan['shopify_refund_id'] ?? '',
                 ],
             ], [
-                'idempotency_key' => $idempotencyKey,
+                'idempotency_key' => $plan['idempotency_key'],
             ]);
 
-            // Stripe reverses fee + transfer proportionally to the refund amount. We compute and
-            // store the expected splits using the payout's fee ratio for reconciliation visibility
-            // — these match what Stripe actually reversed, modulo rounding.
-            $feeRatio = $payout->gross_commission_cents > 0
-                ? $payout->platform_fee_cents / $payout->gross_commission_cents
-                : 0.0;
-            $feeRefundCents = (int) round($refundCents * $feeRatio);
-            $transferReversalCents = $refundCents - $feeRefundCents;
+            $feeRefundCents = (int) round($plan['refund_cents'] * $plan['fee_ratio']);
+            $transferReversalCents = $plan['refund_cents'] - $feeRefundCents;
 
-            $this->insertClawbackRow($payout, $order, $shopifyRefundId, [
-                'refund_id' => $refund->id,
-                'stripe_reversal_id' => $refund->id, // populate legacy column for backward-compat queries
-                'refund_amount_cents' => $refundCents,
-                'application_fee_refund_cents' => $feeRefundCents,
-                'transfer_reversal_cents' => $transferReversalCents,
-                'amount_cents' => $transferReversalCents, // legacy column = the affiliate-side reversal
-                'is_partial' => $isPartial,
-                'needs_manual_refund' => false,
-                'status' => 'reversed',
-                'metadata' => [
-                    'refund_share_cents' => $incrementalRefundCents,
-                    'fee_ratio' => $feeRatio,
-                ],
-            ]);
+            DB::transaction(function () use ($plan, $refund, $feeRefundCents, $transferReversalCents): void {
+                $this->insertClawbackRow($plan, [
+                    'refund_id' => $refund->id,
+                    'stripe_reversal_id' => $refund->id, // legacy column kept populated for back-compat queries
+                    'refund_amount_cents' => $plan['refund_cents'],
+                    'application_fee_refund_cents' => $feeRefundCents,
+                    'transfer_reversal_cents' => $transferReversalCents,
+                    'amount_cents' => $transferReversalCents, // legacy column = affiliate-side reversal
+                    'is_partial' => $plan['is_partial'],
+                    'needs_manual_refund' => false,
+                    'status' => 'reversed',
+                    'metadata' => [
+                        'refund_share_cents' => $plan['incremental_refund_cents'],
+                        'fee_ratio' => $plan['fee_ratio'],
+                    ],
+                ]);
+            });
 
             Log::notice('payout.clawback.refunded', [
-                'payout_id' => $payout->id,
-                'order_id' => $order->id,
+                'payout_id' => $plan['payout_id'],
+                'order_id' => $plan['order_id'],
                 'refund_id' => $refund->id,
-                'refund_cents' => $refundCents,
+                'refund_cents' => $plan['refund_cents'],
                 'fee_refund_cents' => $feeRefundCents,
                 'transfer_reversal_cents' => $transferReversalCents,
             ]);
         } catch (ApiErrorException $e) {
-            // Most common cause: affiliate balance insufficient for proportional reverse_transfer.
-            // Stripe rejects the whole call atomically — nothing happened. We flag for manual
-            // recovery; ops contacts the affiliate or waits for their balance to refill via
-            // future commissions.
-            $payout->forceFill(['needs_manual_refund' => true])->save();
+            // Affiliate-balance-insufficient is the typical cause; Stripe rejected the
+            // call atomically so nothing moved. Flag for manual recovery and record the
+            // attempt — ops contacts the affiliate or waits for the balance to refill.
+            DB::transaction(function () use ($plan, $e): void {
+                $payout = CommissionPayout::query()->where('id', $plan['payout_id'])->first();
+                if ($payout) {
+                    $payout->forceFill(['needs_manual_refund' => true])->save();
+                }
 
-            $this->insertClawbackRow($payout, $order, $shopifyRefundId, [
-                'refund_amount_cents' => $refundCents,
-                'amount_cents' => 0,
-                'is_partial' => $isPartial,
-                'needs_manual_refund' => true,
-                'status' => 'reversal_failed',
-                'failure_reason' => $e->getStripeCode() ?? 'stripe_error',
-                'metadata' => [
-                    'refund_share_cents' => $incrementalRefundCents,
-                    'stripe_message' => $e->getMessage(),
-                ],
-            ]);
+                $this->insertClawbackRow($plan, [
+                    'refund_amount_cents' => $plan['refund_cents'],
+                    'amount_cents' => 0,
+                    'is_partial' => $plan['is_partial'],
+                    'needs_manual_refund' => true,
+                    'status' => 'reversal_failed',
+                    'failure_reason' => $e->getStripeCode() ?? 'stripe_error',
+                    'metadata' => [
+                        'refund_share_cents' => $plan['incremental_refund_cents'],
+                        'stripe_message' => $e->getMessage(),
+                    ],
+                ]);
+            });
 
             Log::error('payout.clawback.refund_failed', [
-                'payout_id' => $payout->id,
-                'order_id' => $order->id,
+                'payout_id' => $plan['payout_id'],
+                'order_id' => $plan['order_id'],
                 'error' => $e->getStripeCode() ?? 'stripe_error',
             ]);
         }
@@ -331,28 +399,31 @@ class CommissionPayoutRefundService
      * fires when the same Shopify refund event has already been processed. Acts as the
      * durable dedup layer beneath the in-memory exists() check.
      *
+     * @param  array{
+     *   payout_id: string,
+     *   order_id: string,
+     *   currency_code: string,
+     *   shopify_refund_id: ?string,
+     *   ...
+     * }  $plan
      * @param  array<string, mixed>  $payload
      */
-    private function insertClawbackRow(
-        CommissionPayout $payout,
-        Order $order,
-        ?string $shopifyRefundId,
-        array $payload,
-    ): void {
+    private function insertClawbackRow(array $plan, array $payload): void
+    {
         $row = array_merge([
-            'payout_id' => $payout->id,
-            'order_id' => $order->id,
-            'shopify_refund_id' => $shopifyRefundId,
-            'currency_code' => strtoupper((string) $payout->currency_code),
+            'payout_id' => $plan['payout_id'],
+            'order_id' => $plan['order_id'],
+            'shopify_refund_id' => $plan['shopify_refund_id'],
+            'currency_code' => $plan['currency_code'],
         ], $payload);
 
         try {
             (new CommissionClawback)->forceFill($row)->save();
         } catch (UniqueConstraintViolationException) {
             Log::info('payout.clawback.duplicate_insert_swallowed', [
-                'payout_id' => $payout->id,
-                'order_id' => $order->id,
-                'shopify_refund_id' => $shopifyRefundId,
+                'payout_id' => $plan['payout_id'],
+                'order_id' => $plan['order_id'],
+                'shopify_refund_id' => $plan['shopify_refund_id'],
             ]);
         }
     }

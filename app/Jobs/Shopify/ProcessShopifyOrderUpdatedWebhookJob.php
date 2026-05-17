@@ -306,11 +306,12 @@ class ProcessShopifyOrderUpdatedWebhookJob implements ShouldQueue
 
                 $order->refresh();
 
-                // Recompute the linked payout in the same transaction — the inner
-                // DB::transaction inside handleOrderRefund nests as a savepoint on pgsql.
-                // Pass the per-event subtotal so post-payout clawbacks claw back only
-                // this refund's share, not the cumulative refund_cents. shopify_refund_id
-                // is the durable dedup key for the clawback ledger.
+                // Recompute the linked payout in the same transaction. handleOrderRefund's
+                // own DB::transaction nests as a savepoint here, AND the completed-payout
+                // path defers the Stripe Refund HTTP call via DB::afterCommit so no row
+                // lock spans the network call (SCALE-1). Pass the per-event subtotal so
+                // post-payout clawbacks claw back only this refund's share, not cumulative
+                // refund_cents. shopify_refund_id is the durable dedup key.
                 if (in_array($order->status, ['refunded', 'partially_refunded'], true)) {
                     app(CommissionPayoutRefundService::class)
                         ->handleOrderRefund($order, $refundSubtotal, $refundId !== '' ? $refundId : null);
