@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffProfessionalC
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSectionManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceCategoryManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceManagementController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyEventReplayController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResyncController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
@@ -370,6 +371,13 @@ Route::prefix('staff')
         // Re-arm order webhooks after drift (topic-version bump, manual delete in Shopify
         // admin). Dispatches the same RegisterShopifyWebhooksJob the brand endpoint uses.
         Route::post('/professionals/{professional}/integrations/shopify/register-webhooks', [StaffShopifyResyncController::class, 'registerWebhooks']);
+
+        // WEBHOOK-1 — replay a single Shopify webhook event from commerce.order_events.
+        // Re-fetches the order from Shopify and dispatches ProcessShopifyOrderWebhookJob
+        // with the original shopify_event_id; the job's internal dedup short-circuits
+        // the duplicate event insert and the orders LWW upsert is a no-op when nothing
+        // upstream has changed. Safe by construction — does NOT bypass the dedup.
+        Route::post('/professionals/{professional}/shopify/events/replay', [StaffShopifyEventReplayController::class, 'invoke']);
 
         // Square / Fresha force-disconnect — admin write, feature-gated to match self-service.
         Route::middleware('feature:square_sync')->group(function () {
