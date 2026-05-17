@@ -171,12 +171,11 @@ it('returns 422 from update() when product_gid or field is missing', function ()
 it('saves a boolean metafield via Admin GraphQL with correct namespace/key/type', function () {
     seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
 
+    // SCALE-5: only one request (productUpdate upsert), no prior findMetafield lookup.
     Http::fake([
-        "https://{$this->shopDomain}/admin/api/*" => Http::sequence()
-            // findMetafield — return no existing metafield → triggers productUpdate create path.
-            ->push(['data' => ['product' => ['metafield' => null]]], 200)
-            // productUpdate — success with no userErrors.
-            ->push(['data' => ['productUpdate' => ['product' => ['id' => $this->productGid], 'userErrors' => []]]], 200),
+        "https://{$this->shopDomain}/admin/api/*" => Http::response([
+            'data' => ['productUpdate' => ['product' => ['id' => $this->productGid], 'userErrors' => []]],
+        ], 200),
     ]);
 
     $request = makeProductSettingsUpdateRequest($this->brandId, [
@@ -188,13 +187,15 @@ it('saves a boolean metafield via Admin GraphQL with correct namespace/key/type'
 
     expect($response->getStatusCode())->toBe(200);
 
-    // Inspect captured request payloads.
+    // Exactly one Shopify call — the productUpdate upsert. No prior find query.
+    Http::assertSentCount(1);
+
+    // The productUpdate mutation embeds metafield namespace=partna, key=active, type=boolean.
     Http::assertSent(function ($req) {
         $body = json_decode($req->body(), true);
         if (! str_contains($req->url(), '/admin/api/')) {
             return false;
         }
-        // The productUpdate mutation embeds metafield namespace=partna, key=active, type=boolean.
         if (! isset($body['variables']['input']['metafields'])) {
             return false;
         }
@@ -210,17 +211,16 @@ it('saves a boolean metafield via Admin GraphQL with correct namespace/key/type'
 it('returns 422 when the saveMetafield mutation returns userErrors', function () {
     seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
 
+    // SCALE-5: single request; the productUpdate itself surfaces the userErrors.
     Http::fake([
-        "https://{$this->shopDomain}/admin/api/*" => Http::sequence()
-            ->push(['data' => ['product' => ['metafield' => null]]], 200)
-            ->push([
-                'data' => [
-                    'productUpdate' => [
-                        'product' => null,
-                        'userErrors' => [['field' => ['metafields'], 'message' => 'Invalid value']],
-                    ],
+        "https://{$this->shopDomain}/admin/api/*" => Http::response([
+            'data' => [
+                'productUpdate' => [
+                    'product' => null,
+                    'userErrors' => [['field' => ['metafields'], 'message' => 'Invalid value']],
                 ],
-            ], 200),
+            ],
+        ], 200),
     ]);
 
     $request = makeProductSettingsUpdateRequest($this->brandId, [

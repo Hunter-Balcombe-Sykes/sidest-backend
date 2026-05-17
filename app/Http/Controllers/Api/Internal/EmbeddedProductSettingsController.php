@@ -511,35 +511,8 @@ GRAPHQL;
             throw new \RuntimeException('Shopify integration is missing credentials.');
         }
 
-        $ownerId = $productGid;
-
-        $metafieldQuery = <<<'GRAPHQL'
-query findMetafield($ownerId: ID!, $namespace: String!, $key: String!) {
-  product(id: $ownerId) {
-    metafield(namespace: $namespace, key: $key) {
-      id
-      value
-    }
-  }
-}
-GRAPHQL;
-
-        $response = Http::timeout(15)
-            ->acceptJson()
-            ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
-            ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
-                'query' => $metafieldQuery,
-                'variables' => [
-                    'ownerId' => $ownerId,
-                    'namespace' => 'partna',
-                    'key' => $key,
-                ],
-            ]);
-
-        $data = $response->json();
-        $metafieldId = Arr::get($data, 'data.product.metafield.id');
-
-        // Build the value for the metafield
+        // productUpdate with a metafields array upserts by (namespace, key) — no
+        // prior findMetafield ID lookup needed (SCALE-5).
         $typedValue = match (true) {
             is_bool($value) => json_encode($value),
             is_numeric($value) => (string) $value,
@@ -553,24 +526,7 @@ GRAPHQL;
             default => 'single_line_text_field',
         };
 
-        if ($metafieldId) {
-            // Update existing metafield
-            $mutation = <<<'GRAPHQL'
-mutation updateMetafield($input: MetafieldInput!) {
-  metafieldUpdate(input: $input) {
-    metafield { id }
-    userErrors { field message }
-  }
-}
-GRAPHQL;
-            $variables = ['input' => [
-                'id' => $metafieldId,
-                'value' => $typedValue,
-                'type' => $type,
-            ]];
-        } else {
-            // For setting a metafield value, use the productSet mutation
-            $mutation = <<<'GRAPHQL'
+        $mutation = <<<'GRAPHQL'
 mutation setProductMetafield($input: ProductInput!) {
   productUpdate(input: $input) {
     product { id }
@@ -578,23 +534,21 @@ mutation setProductMetafield($input: ProductInput!) {
   }
 }
 GRAPHQL;
-            $variables = ['input' => [
-                'id' => $ownerId,
-                'metafields' => [[
-                    'namespace' => 'partna',
-                    'key' => $key,
-                    'value' => $typedValue,
-                    'type' => $type,
-                ]],
-            ]];
-        }
 
         $result = Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
                 'query' => $mutation,
-                'variables' => $variables,
+                'variables' => ['input' => [
+                    'id' => $productGid,
+                    'metafields' => [[
+                        'namespace' => 'partna',
+                        'key' => $key,
+                        'value' => $typedValue,
+                        'type' => $type,
+                    ]],
+                ]],
             ]);
 
         $resultData = $result->json();
@@ -602,7 +556,7 @@ GRAPHQL;
             throw new \RuntimeException("Shopify API returned {$result->status()}");
         }
 
-        $errors = Arr::get($resultData, 'data.productUpdate.userErrors', Arr::get($resultData, 'data.metafieldUpdate.userErrors', []));
+        $errors = Arr::get($resultData, 'data.productUpdate.userErrors', []);
         if (! empty($errors)) {
             $msg = is_array($errors) ? ($errors[0]['message'] ?? 'Unknown error') : 'Unknown error';
             throw new \RuntimeException($msg);

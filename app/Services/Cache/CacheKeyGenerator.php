@@ -393,4 +393,14 @@ class CacheKeyGenerator
     {
         return "embedded:product-settings:{$professionalId}:{$productId}";
     }
+
+    /**
+     * Staff-facing analytics summary, keyed by professional + date range.
+     * Append ":v{analyticsSummaryVersion}" at call-site so busting the
+     * professional's own analytics version invalidates staff views too.
+     */
+    public static function staffAnalyticsSummary(string $professionalId, string $from, string $to): string
+    {
+        return "staff:analytics:summary:{$professionalId}:{$from}:{$to}";
+    }
 }
