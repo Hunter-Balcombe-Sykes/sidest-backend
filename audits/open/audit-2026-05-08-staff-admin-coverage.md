@@ -69,7 +69,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 - [x] **B5 — Notification + invite admin extensions.** #NOTIF-1, #INVITE-1. ~3–5h. Both extend an existing staff controller (`StaffNotificationController` / `StaffInviteController`) with the missing write methods that already exist on the self-service side. Shared mental model: "what can a brand do that staff can't yet?" One PR, two reviewer-friendly diffs.
 
-- [ ] **B6 — Tiny admin parity writes.** #STORE-1, #BRAND-INVITE-PROMOTE-1, #BULK-1, #AFF-PHOTO-1, #NOTES-1. ~3–5h. Each is ≤1h but they share the "extend an existing controller / add one column" shape. Bundling avoids 5 micro-PRs.
+- [x] **B6 — Tiny admin parity writes.** #STORE-1, #BRAND-INVITE-PROMOTE-1, #BULK-1, #AFF-PHOTO-1, #NOTES-1. ~3–5h. Each is ≤1h but they share the "extend an existing controller / add one column" shape. Bundling avoids 5 micro-PRs. Shipped 2026-05-17 (commit `615d3656`).
 
 - [ ] **B7 — Staff upload + media management.** #UPLOAD-1. ~6–10h. Single large bundle covering image-pool / brand-logo / placeholder-image / document under one shared `StaffUploadController` (or sibling per pool, mirroring `ProfessionalUploadController`). Standalone-bundle because all four pools share the `BrandDesignMediaService` infrastructure and the same R2 + WebP variant pipeline — splitting them creates four near-identical sessions. **Watch out:** placeholder-image reorder + delete have ordering invariants — add a Pest test that asserts the `display_order` column stays contiguous after delete.
 
@@ -241,7 +241,7 @@ These are best in their own session because bundling would force unrelated archi
         -- 'adjustment' is already a valid type — no schema change needed
         ```
 
-- [ ] **#NOTES-1** · P1 — Admin notes column on professionals
+- [x] **#NOTES-1** · P1 — Admin notes column on professionals (B6, shipped 2026-05-17)
     - **Where:** new migration adding `core.professionals.admin_notes TEXT NULL`; wire into `app/Http/Requests/Api/Staff/ProfessionalSite/StaffUpdateProfessionalRequest.php` and `app/Http/Resources/ProfessionalStaffResource.php`.
     - **Affects:** Tribal knowledge currently lives in Slack threads.
     - **Effort:** S (~0.5–1h)
@@ -279,7 +279,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::delete('/enquiries/{id}', [ProfessionalEnquiryController::class, 'destroy']);
         ```
 
-- [ ] **#STORE-1** · P1 — Staff-side `deploy` for brand store settings (push to Shopify)
+- [x] **#STORE-1** · P1 — Staff-side `deploy` for brand store settings (push to Shopify) (B6, shipped 2026-05-17)
     - **Where:** extend `app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffStoreSettingsController.php`.
     - **Affects:** After staff edits commission rate, the brand still sees stale rates in Shopify until the brand clicks Deploy themselves.
     - **Effort:** S (~1–2h)
@@ -494,7 +494,7 @@ These are best in their own session because bundling would force unrelated archi
         // Multiple callsites currently — all hardcoded global lookups.
         ```
 
-- [ ] **#BULK-1** · P2 — Bulk professional-status patch
+- [x] **#BULK-1** · P2 — Bulk professional-status patch (B6, shipped 2026-05-17)
     - **Where:** extend `StaffProfessionalController`.
     - **Affects:** Compliance sweeps (suspending fraud-account waves).
     - **Effort:** S (~1–2h)
@@ -581,7 +581,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::put('/site/google-business-profile', [ProfessionalGoogleBusinessProfileController::class, 'upsert']);
         ```
 
-- [ ] **#AFF-PHOTO-1** · P2 — Affiliate custom-product-photo admin (delete only)
+- [x] **#AFF-PHOTO-1** · P2 — Affiliate custom-product-photo admin (delete only) (B6, shipped 2026-05-17)
     - **Where:** new `StaffAffiliatePhotoController`.
     - **Affects:** DMCA / inappropriate content takedowns.
     - **Effort:** M (~1–2h)
@@ -635,7 +635,7 @@ These are best in their own session because bundling would force unrelated archi
     - **What to do:** `POST /staff/professionals/{professional}/emails/send` with `{ template_id, vars }`. Templates: welcome-back, payment-issue, scheduled-maintenance.
     - **Plain English:** One-off emails go through a templated, audit-logged path instead of personal inboxes.
 
-- [ ] **#BRAND-INVITE-PROMOTE-1** · P3 — Staff promote a brand-partner connection
+- [x] **#BRAND-INVITE-PROMOTE-1** · P3 — Staff promote a brand-partner connection (B6, shipped 2026-05-17)
     - **Where:** new `StaffBrandPartnerController`.
     - **Effort:** S (~1h)
     - **What to do:** `POST /staff/professionals/{affiliate}/brand-partners/{brand}/promote`. Mirror self-service.
