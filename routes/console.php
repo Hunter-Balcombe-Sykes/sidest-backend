@@ -144,6 +144,18 @@ Schedule::job(new \App\Jobs\Shopify\ReconcileStuckShopifyIntegrationsJob)
         \Illuminate\Support\Facades\Log::error('Scheduled task failed: reconcile-stuck-shopify-integrations');
     });
 
+// Pattern A Step 5 (embedded-rework): silent-drift detector for integrations
+// where ReconcileStuckShopifyIntegrationsJob nulled the access_token but the
+// brand_profile.brand_status update silently no-op'd. Runs 30 minutes after
+// the reconcile job so any successful heal in the same daily window is
+// observed first. Routes alerts via Nightwatch's exception path; no
+// onFailure handler because the command exits clean by design.
+Schedule::command('partna:report-stuck-shopify-integrations')
+    ->dailyAt('02:30')
+    ->timezone('UTC')
+    ->onOneServer()
+    ->withoutOverlapping();
+
 Schedule::command('partna:analytics:purge-raw-events')
     ->dailyAt('03:00')
     ->withoutOverlapping()
