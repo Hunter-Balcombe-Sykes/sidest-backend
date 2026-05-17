@@ -290,7 +290,9 @@ it('xlsx export returns binary content with the correct content-type', function 
     );
 
     expect($response->headers->get('Content-Type'))->toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    // XLSX is a zip file — first bytes are "PK"
-    $body = $response->getContent();
+    // BinaryFileResponse streams via sendContent(); getContent() is empty by design.
+    // Read the underlying tempfile directly. XLSX is a zip — first bytes are "PK".
+    expect($response)->toBeInstanceOf(\Symfony\Component\HttpFoundation\BinaryFileResponse::class);
+    $body = file_get_contents($response->getFile()->getRealPath());
     expect(substr((string) $body, 0, 2))->toBe('PK');
 });

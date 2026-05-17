@@ -55,6 +55,18 @@ beforeEach(function () {
         updated_at TEXT,
         deleted_at TEXT
     )');
+
+    // CommissionPolicy::view falls through to BrandAccessService::canReadBrandFinancialAnalytics
+    // for non-owner non-affiliate callers, which queries this table. Empty in tests = denyAsNotFound().
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS brand.brand_team_memberships (
+        id TEXT PRIMARY KEY,
+        brand_professional_id TEXT NOT NULL,
+        member_professional_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT
+    )');
 });
 
 function seedPayoutProfessional(string $id, string $handle, string $name, string $type = 'brand'): void
@@ -425,7 +437,7 @@ it('payoutDetail returns the payout and its linked orders for the affiliate', fu
     expect(collect($data['orders'])->pluck('id')->all())->toContain('ord-1', 'ord-2');
 });
 
-it('payoutDetail returns 404 for missing payout', function () {
+it('payoutDetail aborts 404 for missing payout', function () {
     seedPayoutProfessional('pro-aff-d2', 'affd2', 'Aff D2', 'influencer');
 
     $summary = Mockery::mock(CommissionPayoutService::class);
@@ -434,12 +446,13 @@ it('payoutDetail returns 404 for missing payout', function () {
     $request = \Illuminate\Http\Request::create('/api/stripe/payouts/does-not-exist', 'GET');
     $request->attributes->set('professional', $aff);
 
-    $response = makePayoutsController($summary)->payoutDetail($request, 'does-not-exist');
-
-    expect($response->status())->toBe(404);
+    // abort_if($payout === null, 404) → NotFoundHttpException, rendered as JSON 404 by
+    // bootstrap/app.php's exception handler at request time.
+    expect(fn () => makePayoutsController($summary)->payoutDetail($request, 'does-not-exist'))
+        ->toThrow(\Symfony\Component\HttpKernel\Exception\NotFoundHttpException::class);
 });
 
-it('payoutDetail returns 404 for a foreign payout (cross-tenant)', function () {
+it('payoutDetail denies a foreign payout via CommissionPolicy (cross-tenant)', function () {
     seedPayoutProfessional('pro-aff-d3', 'affd3', 'Aff D3', 'influencer');
     seedPayoutProfessional('pro-aff-other', 'affother', 'Aff Other', 'influencer');
     seedPayoutProfessional('pro-brand-d3', 'brandd3', 'Brand D3');
@@ -456,7 +469,8 @@ it('payoutDetail returns 404 for a foreign payout (cross-tenant)', function () {
     $request = \Illuminate\Http\Request::create('/api/stripe/payouts/pay-foreign', 'GET');
     $request->attributes->set('professional', $aff);
 
-    $response = makePayoutsController($summary)->payoutDetail($request, 'pay-foreign');
-
-    expect($response->status())->toBe(404);
+    // CommissionPolicy::view denies cross-tenant via denyAsNotFound() — the Gate throws
+    // AuthorizationException with status 404, which the bootstrap handler renders as 404.
+    expect(fn () => makePayoutsController($summary)->payoutDetail($request, 'pay-foreign'))
+        ->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
 });

@@ -5,9 +5,9 @@ namespace App\Services\Stripe;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Models\Retail\CommissionPayout;
-use Illuminate\Http\Response;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -32,7 +32,7 @@ class ExportService
     /**
      * @param  array<string, mixed>  $filters
      */
-    public function exportTransactions(Professional $pro, string $role, string $format, array $filters): StreamedResponse|Response
+    public function exportTransactions(Professional $pro, string $role, string $format, array $filters): StreamedResponse|BinaryFileResponse
     {
         $rows = $role === 'brand'
             ? $this->transactionFetcher->forBrand($pro, array_merge($filters, ['limit' => 500]))
@@ -64,7 +64,7 @@ class ExportService
     /**
      * @param  array<string, mixed>  $filters
      */
-    public function exportPayouts(Professional $pro, string $role, string $format, array $filters): StreamedResponse|Response
+    public function exportPayouts(Professional $pro, string $role, string $format, array $filters): StreamedResponse|BinaryFileResponse
     {
         $query = $this->scopedPayouts($pro, $role, $filters);
 
@@ -102,10 +102,9 @@ class ExportService
      *
      * @param  array<string, mixed>  $filters
      */
-    public function exportDetailedCommissions(Professional $pro, string $role, string $format, array $filters): StreamedResponse|Response
+    public function exportDetailedCommissions(Professional $pro, string $role, string $format, array $filters): StreamedResponse|BinaryFileResponse
     {
         $payoutsQuery = $this->scopedPayouts($pro, $role, $filters);
-        $payoutIds = $payoutsQuery->pluck('id')->all();
 
         $headers = [
             'payout_id', 'payout_status', 'payout_date', 'order_id', 'shopify_order_id',
@@ -115,11 +114,10 @@ class ExportService
             'currency', 'stripe_pi_id', 'stripe_charge_id',
         ];
 
-        $generator = function () use ($payoutIds) {
-            if (empty($payoutIds)) {
-                return;
-            }
-
+        $generator = function () use ($payoutsQuery) {
+            // Subquery (not pluck('id')->all()) so the payout IDs never round-trip into
+            // PHP memory — at EOFY a long-tenured brand can produce tens of thousands of
+            // IDs. The inner SELECT runs on the DB side as part of the WHERE IN.
             // lazy() (not cursor()) — cursor() silently drops with(), turning each order row
             // into 3 extra SELECTs. lazy() chunks via get() so the eager-load pass runs once
             // per chunk and orderBy('occurred_at') is preserved.
@@ -129,7 +127,7 @@ class ExportService
                     'brandProfessional:id,handle,display_name',
                     'affiliateProfessional:id,handle,display_name',
                 ])
-                ->whereIn('payout_id', $payoutIds)
+                ->whereIn('payout_id', $payoutsQuery->select('id'))
                 ->orderBy('occurred_at')
                 ->lazy();
 
@@ -180,7 +178,7 @@ class ExportService
      *
      * @param  array<string, mixed>  $filters
      */
-    public function exportEofy(Professional $pro, string $role, string $format, array $filters): StreamedResponse|Response
+    public function exportEofy(Professional $pro, string $role, string $format, array $filters): StreamedResponse|BinaryFileResponse
     {
         $fy = (int) ($filters['fy'] ?? $this->currentAuFy());
         $filters['date_from'] = ($fy - 1).'-07-01';
@@ -227,7 +225,7 @@ class ExportService
     /**
      * @param  array<int, string>  $headers
      */
-    private function stream(string $filename, array $headers, \Closure $rowGenerator, string $format): StreamedResponse|Response
+    private function stream(string $filename, array $headers, \Closure $rowGenerator, string $format): StreamedResponse|BinaryFileResponse
     {
         if ($format === 'xlsx') {
             return $this->streamXlsx($filename, $headers, $rowGenerator);
@@ -250,7 +248,7 @@ class ExportService
         ]);
     }
 
-    private function streamXlsx(string $filename, array $headers, \Closure $rowGenerator): Response
+    private function streamXlsx(string $filename, array $headers, \Closure $rowGenerator): BinaryFileResponse
     {
         // openspout writes to a file path; stream the file once written. For small-ish exports
         // this is fine; large exports should go through ExecuteExportJob → Supabase Storage.
@@ -264,13 +262,13 @@ class ExportService
         }
         $writer->close();
 
-        $contents = file_get_contents($tmp) ?: '';
-        @unlink($tmp);
-
-        return response($contents, 200, [
+        // response()->download() returns a BinaryFileResponse, which streams $tmp to the
+        // client via PHP's output buffer in chunks rather than loading the entire XLSX
+        // into a PHP string. deleteFileAfterSend(true) handles tempfile cleanup after the
+        // response is flushed.
+        return response()->download($tmp, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-        ]);
+        ])->deleteFileAfterSend(true);
     }
 
     private function filename(string $type, string $format): string

@@ -418,15 +418,12 @@ class StripeConnectController extends Controller
             'affiliateProfessional:id,display_name,handle',
         ])->find($payoutId);
 
-        $isBrand = ($pro->professional_type ?? null) === 'brand';
-        $ownsAsBrand = $payout && $isBrand
-            && (string) $payout->brand_professional_id === (string) $pro->id;
-        $ownsAsAffiliate = $payout && ! $isBrand
-            && (string) $payout->affiliate_professional_id === (string) $pro->id;
+        // CommissionPolicy::view() is typed Model $record, so it can't accept null.
+        // Handle missing-payout 404 here; cross-tenant 404 is enforced by the policy
+        // via denyAsNotFound() (rendered as 404 in bootstrap/app.php).
+        abort_if($payout === null, 404);
 
-        if (! $payout || (! $ownsAsBrand && ! $ownsAsAffiliate)) {
-            return response()->json(['error' => 'not_found'], 404);
-        }
+        Gate::forUser($pro)->authorize('view', $payout);
 
         $orders = \App\Models\Commerce\Order::query()
             ->where('payout_id', $payoutId)
