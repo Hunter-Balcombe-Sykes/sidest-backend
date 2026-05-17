@@ -113,6 +113,12 @@ class AppServiceProvider extends ServiceProvider
             throw new \RuntimeException('PARTNA_THROTTLE_ENABLED must not be false in production.');
         }
 
+        // Refuse to boot outside tests with a missing Shopify API version — a blank
+        // SHOPIFY_API_VERSION would silently fall back to a stale/deprecated version.
+        if (! app()->environment('testing') && empty(config('services.shopify.api_version'))) {
+            throw new \RuntimeException('SHOPIFY_API_VERSION must be set (e.g. 2026-04).');
+        }
+
         // Auth::user() is always null in this app (Supabase JWT), so a user-based
         // Horizon gate is not possible. Default behavior: dashboard is open in
         // non-production environments and sealed in production. Production access

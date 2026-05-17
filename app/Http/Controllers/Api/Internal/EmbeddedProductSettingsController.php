@@ -224,7 +224,7 @@ class EmbeddedProductSettingsController extends ApiController
     {
         $shopDomain = trim((string) Arr::get($integration->provider_metadata ?? [], 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         $empty = ['metafields' => [], 'variants' => []];
 
@@ -331,7 +331,7 @@ GRAPHQL;
     {
         $shopDomain = trim((string) Arr::get($integration->provider_metadata ?? [], 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $adminToken === '') {
             throw new \RuntimeException('Shopify integration is missing credentials.');
@@ -421,7 +421,7 @@ GRAPHQL;
         // that returns just the product ID if present.
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $storefrontToken = trim((string) ($integration->storefront_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $storefrontToken === '') {
             return false;
@@ -493,7 +493,7 @@ GRAPHQL;
 
         $shopDomain = trim((string) Arr::get($integration->provider_metadata ?? [], 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $adminToken === '') {
             throw new \RuntimeException('Shopify integration is missing credentials.');
@@ -620,7 +620,7 @@ GRAPHQL;
     {
         $shopDomain = trim((string) Arr::get($integration->provider_metadata ?? [], 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $adminToken === '') {
             return;
@@ -674,7 +674,7 @@ GRAPHQL;
 
         $shopDomain = trim((string) Arr::get($metadata, 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
-        $apiVersion = config('services.shopify.api_version', '2025-01');
+        $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $adminToken === '') {
             throw new \RuntimeException('Shopify integration is missing credentials.');
