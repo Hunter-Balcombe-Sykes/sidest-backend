@@ -48,6 +48,15 @@ it('relaxes CSP for horizon sub-paths', function () {
     expect($csp)->toContain("style-src 'self' 'unsafe-inline' https://fonts.bunny.net");
 });
 
+it("includes 'unsafe-eval' in horizon script-src for Vue's runtime template compiler", function () {
+    // Horizon's app.js compiles Vue templates at runtime via dynamic code construction.
+    // Without 'unsafe-eval' in script-src, the dashboard throws EvalError at mount
+    // and no screen renders — only the blue nav background appears.
+    $csp = runSecureHeaders('/horizon/dashboard')->headers->get('Content-Security-Policy');
+
+    expect($csp)->toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
+});
+
 it('keeps the other security headers identical on both paths', function () {
     foreach (['/api/health', '/horizon', '/horizon/jobs/pending'] as $path) {
         $headers = runSecureHeaders($path)->headers;

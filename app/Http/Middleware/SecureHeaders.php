@@ -35,7 +35,10 @@ class SecureHeaders
                 'Content-Security-Policy',
                 "default-src 'self'; "
                 ."style-src 'self' 'unsafe-inline' https://fonts.bunny.net; "
-                ."script-src 'self' 'unsafe-inline'; "
+                // 'unsafe-eval' is required by Vue's runtime template compiler bundled
+                // into Horizon's app.js — without it, mount() throws EvalError on every
+                // screen render and the dashboard never appears.
+                ."script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 ."font-src 'self' https://fonts.bunny.net; "
                 .'img-src \'self\' data:; '
                 ."connect-src 'self'; "
