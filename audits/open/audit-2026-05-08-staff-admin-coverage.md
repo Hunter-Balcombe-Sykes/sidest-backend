@@ -12,10 +12,14 @@
 
 ## Progress
 
-- P0: 1 of 5 complete (#SHOP-1)
-- P1: 3 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2)
-- P2: 0 of 13 complete
+- P0: 2 of 5 complete (#SHOP-1, #GDPR-1)
+- P1: 5 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2, #ANALYTICS-1, #CATALOG-1)
+- P2: 5 of 13 complete (#BRAND-SETUP-1, #COLLECTION-1, #GBP-1, #BOOK-1, #STRIPE-PM-1)
 - P3: 0 of 6 complete (defer-by-default per agent memory; build only when a real ticket lands)
+
+B2 read-only inspector bundle landed on 2026-05-17. Items still carrying an
+unticked write half: #ENQUIRY-1 (admin DELETE), #BRAND-DESIGN-1 (resync POST),
+#AFF-SEL-1 (reset-to-defaults POST) — covered by future admin-write sessions.
 
 ## Coverage summary (today)
 
@@ -57,7 +61,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 - [x] **B1 — Integration status + disconnect mirrors.** #SQUARE-1, #FRESHA-1, #SHOP-1, #SHOP-2. ~3–4h. All four are "create a staff endpoint that calls the existing service the self-service controller already uses." Same pattern, same auth tier (admin write for disconnect/re-register, any-staff for status). One Pest sweep across all four. **Don't pull in:** #PAYOUT-1 (Stripe field-mapping risk — keep standalone).
 
-- [ ] **B2 — Read-only inspector mirrors.** #GDPR-1, #ENQUIRY-1, #BRAND-SETUP-1, #BRAND-DESIGN-1, #COLLECTION-1, #GBP-1, #BOOK-1, #ANALYTICS-1, #CATALOG-1, #STRIPE-PM-1, #AFF-SEL-1 (read-only part). ~6–8h. All "GET endpoint exposing the same payload the brand sees." Mechanical mirror — wire the controller, return the existing service's response, write a Pest test that hits the endpoint as staff. Same review surface (no writes, no side-effects).
+- [x] **B2 — Read-only inspector mirrors.** #GDPR-1, #ENQUIRY-1, #BRAND-SETUP-1, #BRAND-DESIGN-1, #COLLECTION-1, #GBP-1, #BOOK-1, #ANALYTICS-1, #CATALOG-1, #STRIPE-PM-1, #AFF-SEL-1 (read-only part). ~6–8h. All "GET endpoint exposing the same payload the brand sees." Mechanical mirror — wire the controller, return the existing service's response, write a Pest test that hits the endpoint as staff. Same review surface (no writes, no side-effects). Shipped 2026-05-17 — 11 GET endpoints across 11 new staff controllers + 31 Pest tests.
 
 - [x] **B3 — Staff subscription extensions.** #SUB-1, #SUB-2. ~1–2h. Both extend `StaffSubscriptionManagementController` with parallel methods that already exist on `SubscriptionController`. One file, two methods, one Pest test that asserts each returns the same shape as self-service.
 
@@ -178,7 +182,7 @@ These are best in their own session because bundling would force unrelated archi
         // grep -r "impersonat" app/ → no matches as of 2026-05-08
         ```
 
-- [ ] **#GDPR-1** · P0 — Email-subscriber list + export for any brand (GDPR Article 15/20)
+- [x] **#GDPR-1** · P0 — Email-subscriber list + export for any brand (GDPR Article 15/20)
     - **Where:** new `app/Http/Controllers/Api/Staff/StaffSite/StaffEmailSubscriberController.php`; mirror `app/Http/Controllers/Api/Professional/Notifications/ProfessionalEmailSubscriptionController.php`.
     - **Affects:** Compliance — GDPR Article 15/20 requests for marketing-list inclusion arrive at Partna support, not the brand.
     - **Effort:** S (~1–2h)
@@ -202,7 +206,7 @@ These are best in their own session because bundling would force unrelated archi
 
 ## P1 — meaningful gap, today needs DB or a dev
 
-- [ ] **#ANALYTICS-1** · P1 — Brand commerce-analytics overview for staff
+- [x] **#ANALYTICS-1** · P1 — Brand commerce-analytics overview for staff
     - **Where:** new `app/Http/Controllers/Api/Staff/StaffSite/StaffBrandCommerceAnalyticsController.php`; mirror `app/Http/Controllers/Api/Professional/Analytics/BrandCommerceAnalyticsController.php`.
     - **Affects:** Sales team / support both need GMV/conversion view for a brand without a screen-share.
     - **Effort:** S (~1–2h)
@@ -316,7 +320,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::patch('/brand/catalog/{productGid}/active', [BrandCatalogController::class, 'toggleActive']);
         ```
 
-- [ ] **#CATALOG-1** · P1 — Read-only brand catalog inspector
+- [x] **#CATALOG-1** · P1 — Read-only brand catalog inspector
     - **Where:** new `app/Http/Controllers/Api/Staff/StaffSite/StaffBrandCatalogController.php`; mirror reads from `app/Http/Controllers/Api/Professional/Store/BrandCatalogController.php`.
     - **Affects:** Triaging "my discount isn't showing" requires a Shopify admin login support doesn't have.
     - **Effort:** L (~3–5h)
@@ -513,7 +517,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Standalone — touches dedup logic. Don't bypass the dedup; let it short-circuit on duplicates and return a "already processed" flag.
     - **Plain English:** When one order's commission rolls up wrong, staff can replay just that event without a full resync.
 
-- [ ] **#STRIPE-PM-1** · P2 — Read-only payment methods + payouts list
+- [x] **#STRIPE-PM-1** · P2 — Read-only payment methods + payouts list
     - **Where:** extend `StaffStripeConnectController` (added in #PAYOUT-1).
     - **Affects:** Card-decline triage.
     - **Effort:** S (~1h)
@@ -548,7 +552,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** The portal session belongs to the brand's Stripe customer; staff should never see a billing-portal URL that grants access to the brand's payment methods.
     - **Plain English:** Admin mints a billing-portal link, the brand receives it by email, the brand can update their card without re-onboarding.
 
-- [ ] **#BOOK-1** · P2 — Booking settings inspector (read-only)
+- [x] **#BOOK-1** · P2 — Booking settings inspector (read-only)
     - **Where:** new `StaffBookingController` gated on `feature:smart_booking`.
     - **Effort:** S (~1h)
     - **What to do:**
@@ -564,7 +568,7 @@ These are best in their own session because bundling would force unrelated archi
         });
         ```
 
-- [ ] **#GBP-1** · P2 — Google Business Profile read for staff
+- [x] **#GBP-1** · P2 — Google Business Profile read for staff
     - **Where:** extend `StaffSiteController`.
     - **Effort:** S (~0.5h)
     - **What to do:**
@@ -596,7 +600,7 @@ These are best in their own session because bundling would force unrelated archi
         - `POST /staff/professionals/{professional}/affiliate/selections/reset-to-defaults` (admin-only).
     - **Plain English:** When an affiliate's storefront is stuck on stale selections, support can reset them to brand defaults.
 
-- [ ] **#COLLECTION-1** · P2 — Brand collections inspector (read-only)
+- [x] **#COLLECTION-1** · P2 — Brand collections inspector (read-only)
     - **Where:** new `StaffBrandCollectionController`.
     - **Effort:** S (~1h)
     - **What to do:**
@@ -611,7 +615,7 @@ These are best in their own session because bundling would force unrelated archi
         - `POST /staff/professionals/{professional}/brand/design/resync` (admin-only).
     - **Plain English:** Theme tokens drift between Partna and Shopify after manual edits in the Shopify admin; resync is the canonical fix.
 
-- [ ] **#BRAND-SETUP-1** · P2 — Brand onboarding readiness + setup status (read-only)
+- [x] **#BRAND-SETUP-1** · P2 — Brand onboarding readiness + setup status (read-only)
     - **Where:** new `StaffBrandSetupController`.
     - **Effort:** S (~1h)
     - **What to do:**

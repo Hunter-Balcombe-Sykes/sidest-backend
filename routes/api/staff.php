@@ -18,10 +18,21 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffServiceManage
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResyncController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStripeConnectController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffAffiliateSelectionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBookingController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBrandCatalogController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBrandCollectionController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBrandCommerceAnalyticsController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBrandDesignController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffBrandSetupController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffEmailSubscriberController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffEnquiryController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffFreshaController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffGoogleBusinessProfileController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationEmailPolicyController;
@@ -138,6 +149,63 @@ Route::prefix('staff')
         Route::middleware('feature:fresha_sync')->group(function () {
             Route::get('/professionals/{professional}/fresha/status', [StaffFreshaController::class, 'status']);
         });
+
+        // ── B2: Read-only inspector mirrors ──────────────────────────────────
+        // Every route below is a "GET endpoint exposing the same payload the
+        // brand sees" — any-staff read, no admin gate. Audit: B2 bundle in
+        // audits/open/audit-2026-05-08-staff-admin-coverage.md.
+
+        // #GDPR-1 — email subscribers list + CSV export. Compliance: Article 15/20
+        // requests routed to Partna support need a way to answer without the brand.
+        Route::get('/professionals/{professional}/email-subscribers', [StaffEmailSubscriberController::class, 'index']);
+        Route::get('/professionals/{professional}/email-subscribers/export', [StaffEmailSubscriberController::class, 'export']);
+
+        // #ENQUIRY-1 — contact-form enquiries inbox (read).
+        Route::get('/professionals/{professional}/enquiries', [StaffEnquiryController::class, 'index']);
+
+        // #BRAND-SETUP-1 — onboarding readiness + setup-wizard status.
+        Route::get('/professionals/{professional}/brand/onboarding-readiness', [StaffBrandSetupController::class, 'readiness']);
+        Route::get('/professionals/{professional}/brand/setup/status', [StaffBrandSetupController::class, 'setupStatus']);
+
+        // #BRAND-DESIGN-1 — resolved brand design shape (logo, tokens, theme mode).
+        Route::get('/professionals/{professional}/brand/design', [StaffBrandDesignController::class, 'show']);
+
+        // #COLLECTION-1 — products in a brand's Shopify collection (active|default|favourites).
+        Route::get('/professionals/{professional}/brand/collections/{collectionType}/products', [StaffBrandCollectionController::class, 'index'])
+            ->where('collectionType', 'active|default|favourites');
+
+        // #GBP-1 — Google Business Profile snapshot stored in site.settings.
+        Route::get('/professionals/{professional}/site/google-business-profile', [StaffGoogleBusinessProfileController::class, 'show']);
+
+        // #BOOK-1 — booking settings + smart-mode analytics. Settings read works
+        // even when smart_booking is off; analytics returns smart_mode_required:true
+        // for non-smart brands (mirroring the brand-side behaviour).
+        Route::get('/professionals/{professional}/booking/settings', [StaffBookingController::class, 'settings']);
+        Route::middleware('feature:smart_booking')->group(function () {
+            Route::get('/professionals/{professional}/booking/analytics', [StaffBookingController::class, 'analytics']);
+        });
+
+        // #ANALYTICS-1 — brand commerce overview. Delegates to the brand controller
+        // so the cache key is shared (per CLAUDE.md commerce-read pattern).
+        Route::get('/professionals/{professional}/commerce-analytics', [StaffBrandCommerceAnalyticsController::class, 'overview']);
+
+        // #CATALOG-1 — Shopify catalog inspector. Never expose a ?fresh=true flag
+        // here — that would let a forgotten admin tab burn the brand's Shopify
+        // rate-limit budget. Same TTL, same single-flight lock as the brand side.
+        Route::get('/professionals/{professional}/brand/catalog', [StaffBrandCatalogController::class, 'index']);
+        Route::get('/professionals/{professional}/brand/catalog/all', [StaffBrandCatalogController::class, 'all']);
+        Route::get('/professionals/{professional}/brand/catalog/debug', [StaffBrandCatalogController::class, 'debug']);
+
+        // #STRIPE-PM-1 — Stripe payment methods (brand-only data, last4+brand) and
+        // payouts list across both brand and affiliate roles for the inspected pro.
+        // Future #PAYOUT-1 session extends StaffStripeConnectController with the
+        // curated Connect status read.
+        Route::get('/professionals/{professional}/stripe/payment-methods', [StaffStripeConnectController::class, 'paymentMethods']);
+        Route::get('/professionals/{professional}/stripe/payouts', [StaffStripeConnectController::class, 'payouts']);
+
+        // #AFF-SEL-1 (read part) — affiliate selections inspector. The reset-to-defaults
+        // POST is an admin write and is intentionally not included in B2.
+        Route::get('/professionals/{professional}/affiliate/selections', [StaffAffiliateSelectionController::class, 'index']);
     });
 
 // Authorised Staff Admin Editing
