@@ -9,16 +9,13 @@ use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-// Staff inspector for a brand/affiliate's Stripe-side state (#STRIPE-PM-1).
+// Staff inspector for a brand/affiliate's Stripe-side state.
+// Read-only. Covers #STRIPE-PM-1 (paymentMethods, payouts) and #PAYOUT-1 (status).
 //
-// Read-only. Future #PAYOUT-1 session extends this controller with a curated
-// status read (charges_enabled, payouts_enabled, requirements_summary, etc.) —
-// the column-tight field allowlist must stay in this controller so a forgotten
-// caller can't accidentally leak raw Stripe responses.
-//
-// Field-level safety: payment-method rows expose brand + last4 only — never PAN,
-// expiry, or CVC (Stripe doesn't return those, but this comment is here so the
-// next contributor doesn't widen the projection by accident).
+// Field-level safety: every method here returns a column-tight allowlist — never
+// the raw \Stripe\Account or PaymentMethod object. Payment-method rows expose
+// brand + last4 only — never PAN, expiry, or CVC (Stripe doesn't return those,
+// but the column-tight projection is the line of defence if that ever changes).
 class StaffStripeConnectController extends ApiController
 {
     public function __construct(
@@ -40,6 +37,65 @@ class StaffStripeConnectController extends ApiController
         $methods = $this->connectService->listPaymentMethods($professional);
 
         return $this->success(['payment_methods' => $methods]);
+    }
+
+    /**
+     * GET /staff/professionals/{professional}/stripe/status
+     *
+     * Read-only Stripe Connect state for a single professional — the support
+     * triage view when a commission payout is stuck. Curated allowlist only:
+     * the raw `\Stripe\Account` response carries internal IDs and customer-
+     * facing requirement payloads that L1 support doesn't need.
+     *
+     * Field naming: card_payments_active / stripe_transfers_active are the v2
+     * dual-capability names (was charges_enabled / payouts_enabled on v1).
+     * Aligned with the brand-facing /stripe/status response so the staff
+     * inspector and self-service dashboard read the same vocabulary.
+     *
+     * @return JsonResponse with keys:
+     *   - has_account: bool — true when a Connect account exists (regardless of capabilities)
+     *   - status: 'not_connected'|'onboarding'|'restricted'|'active'
+     *   - card_payments_active: bool — v2 merchant.card_payments capability is active
+     *   - stripe_transfers_active: bool — v2 recipient.stripe_transfers capability is active
+     *   - requirements_summary: string[] — Stripe requirement codes (already curated by extractRequirements)
+     *   - payment_methods_count: int — 0..2, count of (card + becs) PMs on file
+     *   - default_payment_method_last4: ?string — last4 of the preferred PM (or null)
+     *   - funding_mode: 'auto_charge'|'manual_topup' — stripe_commission_funding_mode column
+     */
+    public function status(Professional $professional): JsonResponse
+    {
+        $connect = $this->connectService->syncAccountStatus($professional);
+        $professional->refresh();
+
+        $hasCard = ! empty($professional->stripe_card_payment_method_id);
+        $hasBecs = ! empty($professional->stripe_becs_payment_method_id);
+        $paymentMethodsCount = ($hasCard ? 1 : 0) + ($hasBecs ? 1 : 0);
+
+        // Default last4 mirrors resolveBrandPaymentMethod's selection order:
+        // preferred type first, then BECS fallback, then card. Keeps the staff
+        // inspector consistent with the PM the platform actually charges.
+        $defaultLast4 = null;
+        $preferred = $professional->preferred_payout_method;
+        if ($preferred === 'card' && $hasCard) {
+            $defaultLast4 = $professional->stripe_card_last4;
+        } elseif ($preferred === 'becs' && $hasBecs) {
+            $defaultLast4 = $professional->stripe_becs_last4;
+        } elseif ($hasBecs) {
+            $defaultLast4 = $professional->stripe_becs_last4;
+        } elseif ($hasCard) {
+            $defaultLast4 = $professional->stripe_card_last4;
+        }
+
+        return $this->success([
+            'has_account' => ($connect['status'] ?? 'not_connected') !== 'not_connected',
+            'status' => $connect['status'] ?? 'not_connected',
+            'card_payments_active' => (bool) ($connect['card_payments_active'] ?? false),
+            'stripe_transfers_active' => (bool) ($connect['stripe_transfers_active'] ?? false),
+            'requirements_summary' => $connect['requirements'] ?? [],
+            'payment_methods_count' => $paymentMethodsCount,
+            'default_payment_method_last4' => $defaultLast4,
+            'funding_mode' => $professional->stripe_commission_funding_mode ?? 'auto_charge',
+        ]);
     }
 
     /**

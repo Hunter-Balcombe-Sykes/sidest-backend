@@ -203,10 +203,10 @@ Route::prefix('staff')
 
         // #STRIPE-PM-1 — Stripe payment methods (brand-only data, last4+brand) and
         // payouts list across both brand and affiliate roles for the inspected pro.
-        // Future #PAYOUT-1 session extends StaffStripeConnectController with the
-        // curated Connect status read.
+        // #PAYOUT-1 — curated Connect status read for support triage on stuck payouts.
         Route::get('/professionals/{professional}/stripe/payment-methods', [StaffStripeConnectController::class, 'paymentMethods']);
         Route::get('/professionals/{professional}/stripe/payouts', [StaffStripeConnectController::class, 'payouts']);
+        Route::get('/professionals/{professional}/stripe/status', [StaffStripeConnectController::class, 'status']);
 
         // #AFF-SEL-1 (read part) — affiliate selections inspector. The reset-to-defaults
         // POST is an admin write and is intentionally not included in B2.
