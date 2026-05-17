@@ -59,7 +59,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 - [ ] **B2 — Read-only inspector mirrors.** #GDPR-1, #ENQUIRY-1, #BRAND-SETUP-1, #BRAND-DESIGN-1, #COLLECTION-1, #GBP-1, #BOOK-1, #ANALYTICS-1, #CATALOG-1, #STRIPE-PM-1, #AFF-SEL-1 (read-only part). ~6–8h. All "GET endpoint exposing the same payload the brand sees." Mechanical mirror — wire the controller, return the existing service's response, write a Pest test that hits the endpoint as staff. Same review surface (no writes, no side-effects).
 
-- [ ] **B3 — Staff subscription extensions.** #SUB-1, #SUB-2. ~1–2h. Both extend `StaffSubscriptionManagementController` with parallel methods that already exist on `SubscriptionController`. One file, two methods, one Pest test that asserts each returns the same shape as self-service.
+- [x] **B3 — Staff subscription extensions.** #SUB-1, #SUB-2. ~1–2h. Both extend `StaffSubscriptionManagementController` with parallel methods that already exist on `SubscriptionController`. One file, two methods, one Pest test that asserts each returns the same shape as self-service.
 
 - [ ] **B4 — Catalog admin overrides.** #CATALOG-2 (3 endpoints: commission, discount, active). ~2–3h. Same pattern across three product-field PATCH endpoints. Pre-req: #CATALOG-1 (the read-only inspector) so the admin can see what they're editing. One Pest sweep that toggles each field and asserts it round-trips through the brand's own dashboard.
 
@@ -524,7 +524,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Technical:** Read-only mirrors. Field allowlist must be tight — never expose raw Stripe responses.
     - **Plain English:** Support can see "card ending 4242 declined on 2026-05-07" without asking the brand.
 
-- [ ] **#SUB-2** · P2 — Subscription preview-change for staff
+- [x] **#SUB-2** · P2 — Subscription preview-change for staff
     - **Where:** extend `StaffSubscriptionManagementController`.
     - **Affects:** Plan-change conversations.
     - **Effort:** S (~0.5h)
@@ -538,7 +538,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::get('/me/subscription/preview-change', [SubscriptionController::class, 'previewPlanChange']);
         ```
 
-- [ ] **#SUB-1** · P2 — Stripe billing portal link minted by staff
+- [x] **#SUB-1** · P2 — Stripe billing portal link minted by staff
     - **Where:** extend `StaffSubscriptionManagementController`.
     - **Affects:** Card-decline recovery.
     - **Effort:** S (~0.5–1h)

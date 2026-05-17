@@ -101,6 +101,9 @@ Route::prefix('staff')
         // View Subscription
         Route::get('/professionals/{professional}/subscription', [StaffSubscriptionManagementController::class, 'show']);
 
+        // Preview a plan change (proration) — read-only mirror of self-service.
+        Route::get('/professionals/{professional}/subscription/preview-change', [StaffSubscriptionManagementController::class, 'previewChange']);
+
         // View affiliates linked to a brand
         Route::get('/professionals/{professional}/affiliates', [StaffAffiliateController::class, 'index']);
 
@@ -205,6 +208,11 @@ Route::prefix('staff')
         Route::patch('/professionals/{professional}/subscription', [StaffSubscriptionManagementController::class, 'update']);
         Route::post('/professionals/{professional}/subscription/cancel', [StaffSubscriptionManagementController::class, 'cancel']);
         Route::post('/professionals/{professional}/subscription/resume', [StaffSubscriptionManagementController::class, 'resume']);
+
+        // Mint a Stripe billing-portal session and email it to the brand. The
+        // URL is intentionally NOT returned to staff — only the account holder
+        // receives the link (NotificationPublisher → SubscriptionMail).
+        Route::post('/professionals/{professional}/subscription/billing-portal', [StaffSubscriptionManagementController::class, 'billingPortal']);
 
         // Notifications
         Route::post('/notifications', [StaffNotificationController::class, 'store']);
