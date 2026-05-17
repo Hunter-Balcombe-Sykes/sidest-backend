@@ -66,77 +66,89 @@ class EmbeddedProductAnalyticsController extends ApiController
     {
         $thirtyDaysAgo = now()->subDays(30);
 
-        // Phase 4+: read from commerce.order_items (denormalized per-line) joined to commerce.orders
-        // for status filtering. Excludes stub/cancelled/voided/refunded so they don't pollute totals.
-        // The webhook job pre-computes per-line commission_cents/commission_rate into the line_items
-        // JSONB; the order_items_diff trigger mirrors them into this table.
-        $rows = DB::table('commerce.order_items as oi')
+        // SCALE-4: aggregation happens in PostgreSQL, not PHP. The previous
+        // implementation hydrated every matching commerce.order_items row into
+        // a Collection and summed in a foreach — at ~5% of a brand's volume on
+        // a single product that's ~8K rows / 2-4 MB per cache miss. Splitting
+        // into three indexed queries (totals SUM, GROUP BY variant rollup,
+        // LIMIT 5 recent) keeps PHP memory flat and lets the planner use the
+        // (brand_professional_id, shopify_product_id, occurred_at) index.
+        //
+        // Phase 4+ note: reads from commerce.order_items (denormalized per-line)
+        // joined to commerce.orders for status filtering. Excludes
+        // stub/cancelled/voided/refunded so they don't pollute totals. The
+        // webhook job pre-computes per-line commission_cents/commission_rate
+        // into the line_items JSONB; the order_items_diff trigger mirrors them
+        // into order_items.
+        $baseQuery = fn () => DB::table('commerce.order_items as oi')
             ->join('commerce.orders as o', 'o.id', '=', 'oi.order_id')
-            ->leftJoin('core.professionals as p', 'p.id', '=', 'oi.affiliate_professional_id')
             ->where('oi.brand_professional_id', $professionalId)
             ->where('oi.shopify_product_id', $productId)
             ->where('oi.occurred_at', '>=', $thirtyDaysAgo)
-            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES)
+            ->whereNotIn('o.status', Order::EXCLUDED_FROM_AGGREGATES);
+
+        // Totals — one scalar-aggregate row. weighted_rate_sum / rate_weight
+        // matches the original weighted-average formula:
+        //   avg_rate = Σ (rate × commission_cents) / Σ commission_cents
+        // ("what fraction of commission paid came through how steep a rate").
+        // MAX(currency_code) is a stable arbitrary pick — brands have a single
+        // currency in practice; the COALESCE fallback in build() handles empty.
+        $totalsRow = $baseQuery()
+            ->selectRaw('
+                COALESCE(SUM(oi.quantity), 0) AS total_units,
+                COALESCE(SUM(oi.line_total_cents), 0) AS total_revenue_cents,
+                COALESCE(SUM(oi.commission_cents), 0) AS total_commission_cents,
+                COALESCE(SUM(oi.commission_rate * oi.commission_cents), 0) AS weighted_rate_sum,
+                MAX(oi.currency_code) AS currency_code
+            ')
+            ->first();
+
+        // Per-variant rollup — GROUP BY in SQL, one row per variant. Shopify
+        // line_item.variant_title is not mirrored into order_items (only
+        // line_item.title is), so we surface oi.title as the closest stable
+        // proxy. MAX(title) is used for cross-DB portability (tests run on
+        // SQLite); in practice all rows for a given variant_id carry the same
+        // title unless the brand renamed the product.
+        $variantRows = $baseQuery()
+            ->groupBy('oi.shopify_variant_id')
+            ->orderByRaw('SUM(oi.line_total_cents) DESC')
+            ->selectRaw('
+                oi.shopify_variant_id,
+                COALESCE(SUM(oi.quantity), 0) AS units,
+                COALESCE(SUM(oi.line_total_cents), 0) AS revenue_cents,
+                MAX(oi.title) AS variant_title
+            ')
+            ->get();
+
+        // Recent sales — only the last 5 lines are hydrated, joined to
+        // professionals for the affiliate display name.
+        $recentRows = $baseQuery()
+            ->leftJoin('core.professionals as p', 'p.id', '=', 'oi.affiliate_professional_id')
             ->orderByDesc('oi.occurred_at')
+            ->limit(5)
             ->get([
-                'oi.shopify_variant_id',
-                'oi.title',
                 'oi.quantity',
                 'oi.line_total_cents',
                 'oi.commission_cents',
-                'oi.commission_rate',
-                'oi.currency_code',
                 'oi.occurred_at',
-                'oi.affiliate_professional_id',
                 'p.display_name as affiliate_name',
             ]);
 
-        $totalUnits = 0;
-        $totalRevenueCents = 0;
-        $totalCommissionCents = 0;
-        $weightedRateSum = 0.0;
-        $rateWeight = 0;
-        $currency = 'AUD';
+        $totalUnits = (int) ($totalsRow->total_units ?? 0);
+        $totalRevenueCents = (int) ($totalsRow->total_revenue_cents ?? 0);
+        $totalCommissionCents = (int) ($totalsRow->total_commission_cents ?? 0);
+        $weightedRateSum = (float) ($totalsRow->weighted_rate_sum ?? 0);
+        $avgRate = $totalCommissionCents > 0 ? $weightedRateSum / $totalCommissionCents : 0.0;
+        $currency = (string) ($totalsRow->currency_code ?? 'AUD');
 
-        // variant_id => { variant_id, variant_title, units, revenue_cents }
-        $variants = [];
+        $variantsList = $variantRows->map(fn ($row) => [
+            'variant_id' => (string) ($row->shopify_variant_id ?? ''),
+            'variant_title' => (string) ($row->variant_title ?? ''),
+            'units' => (int) $row->units,
+            'revenue_cents' => (int) $row->revenue_cents,
+        ])->values()->all();
 
-        foreach ($rows as $row) {
-            $qty = (int) $row->quantity;
-            $revenueCents = (int) $row->line_total_cents;
-            $commissionCents = (int) $row->commission_cents;
-
-            $totalUnits += $qty;
-            $totalRevenueCents += $revenueCents;
-            $totalCommissionCents += $commissionCents;
-            $weightedRateSum += ((float) $row->commission_rate) * $commissionCents;
-            $rateWeight += $commissionCents;
-            $currency = (string) ($row->currency_code ?? $currency);
-
-            $variantId = (string) ($row->shopify_variant_id ?? '');
-            $variantKey = $variantId !== '' ? $variantId : '__no_variant__';
-
-            if (! isset($variants[$variantKey])) {
-                // Shopify line_item.variant_title is not captured into order_items
-                // (only line_item.title is mirrored). For variant-aware display the
-                // line title is the closest stable proxy; pure-product orders show
-                // the product title, variant orders show whatever Shopify formatted.
-                $variants[$variantKey] = [
-                    'variant_id' => $variantId,
-                    'variant_title' => (string) ($row->title ?? ''),
-                    'units' => 0,
-                    'revenue_cents' => 0,
-                ];
-            }
-            $variants[$variantKey]['units'] += $qty;
-            $variants[$variantKey]['revenue_cents'] += $revenueCents;
-        }
-
-        // Sort variants by revenue desc, drop the synthetic key.
-        $variantsList = array_values($variants);
-        usort($variantsList, fn ($a, $b) => $b['revenue_cents'] <=> $a['revenue_cents']);
-
-        $recentSales = $rows->take(5)->map(function ($row) {
+        $recentSales = $recentRows->map(function ($row) {
             $occurredAt = $row->occurred_at !== null ? \Illuminate\Support\Carbon::parse($row->occurred_at) : null;
 
             return [
@@ -147,8 +159,6 @@ class EmbeddedProductAnalyticsController extends ApiController
                 'occurred_at' => $occurredAt?->toIso8601String(),
             ];
         })->values()->all();
-
-        $avgRate = $rateWeight > 0 ? $weightedRateSum / $rateWeight : 0.0;
 
         return [
             'product_id' => $productId,

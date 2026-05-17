@@ -166,6 +166,50 @@ it('resolves active=null when no Shopify integration row exists for the brand', 
     expect($data['active'])->toBeNull();
 });
 
+it('build() issues a constant number of order_items queries regardless of row count (SCALE-4)', function () {
+    // Regression guard: aggregation must happen in PostgreSQL, not PHP. If
+    // someone reverts to ->get() + foreach the row count rises with data
+    // volume — this test pins the contract at 3 queries against order_items
+    // (totals SUM, GROUP BY variant rollup, LIMIT 5 recent) regardless of
+    // how many rows match.
+    mock(BrandCatalogService::class)->shouldReceive('fetchProductActiveMetafield')->andReturn(null);
+
+    // 50 order_items across 5 variants — well above what a naive hydration
+    // would tolerate while still fast in SQLite.
+    foreach (range(1, 5) as $variantNum) {
+        foreach (range(1, 10) as $_) {
+            seedAnalyticsOrderItem($this->brandId, $this->affiliateId, $this->productId, [
+                'shopify_variant_id' => "v{$variantNum}",
+                'title' => "Variant {$variantNum}",
+                'quantity' => 1,
+                'line_total_cents' => 10000,
+                'commission_cents' => 1000,
+                'commission_rate' => 0.10,
+            ]);
+        }
+    }
+
+    DB::connection('pgsql')->enableQueryLog();
+
+    $data = callProductShow($this->controller, $this->brandId, $this->productId);
+
+    $orderItemsQueries = array_filter(
+        DB::connection('pgsql')->getQueryLog(),
+        fn ($q) => str_contains($q['query'], 'commerce"."order_items')
+            || str_contains($q['query'], 'commerce.order_items'),
+    );
+
+    // 3 queries: totals SUM, GROUP BY variant rollup, LIMIT 5 recent sales.
+    expect(count($orderItemsQueries))->toBe(3);
+
+    // Correctness sanity-check: totals reflect all 50 rows.
+    expect($data['totals']['units'])->toBe(50);
+    expect($data['totals']['revenue_cents'])->toBe(500000);
+    expect($data['totals']['commission_cents'])->toBe(50000);
+    expect($data['variants'])->toHaveCount(5);
+    expect($data['recent_sales'])->toHaveCount(5);
+});
+
 it('caches resolveActive across requests (single Shopify hit)', function () {
     // Seed a Shopify integration so resolveActive proceeds.
     DB::connection('pgsql')->table('core.professional_integrations')->insert([
