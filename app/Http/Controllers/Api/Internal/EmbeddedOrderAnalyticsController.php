@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveEmbeddedProfessional;
 use App\Models\Commerce\Order;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,8 @@ use Illuminate\Http\Request;
 // middleware for in-extension calls).
 class EmbeddedOrderAnalyticsController extends ApiController
 {
+    use ResolveEmbeddedProfessional;
+
     /**
      * @return JsonResponse {
      *                      order_id: string,
@@ -38,7 +41,7 @@ class EmbeddedOrderAnalyticsController extends ApiController
      */
     public function show(Request $request, string $shopifyOrderId): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professionalId = $this->currentEmbeddedProfessionalId($request);
 
         // Strip the GID prefix if Shopify hands us one — orders table stores numeric IDs.
         $orderId = (string) preg_replace('#^gid://shopify/Order/#', '', $shopifyOrderId);

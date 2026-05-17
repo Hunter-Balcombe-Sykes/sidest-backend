@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveEmbeddedProfessional;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
@@ -20,6 +21,8 @@ use Illuminate\Support\Facades\DB;
 // non-trivial and the data only refreshes on Shopify orders/paid webhooks.
 class EmbeddedProductAnalyticsController extends ApiController
 {
+    use ResolveEmbeddedProfessional;
+
     public function __construct(
         private readonly BrandCatalogService $catalog,
         private readonly CacheLockService $cacheLock,
@@ -38,7 +41,7 @@ class EmbeddedProductAnalyticsController extends ApiController
      */
     public function show(Request $request, string $shopifyProductId): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professionalId = $this->currentEmbeddedProfessionalId($request);
         $productId = (string) preg_replace('#^gid://shopify/Product/#', '', $shopifyProductId);
 
         $cacheKey = CacheKeyGenerator::embeddedProductAnalytics($professionalId, $productId);
