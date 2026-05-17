@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api\Professional\Brand;
 
-use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
@@ -11,13 +10,11 @@ use App\Jobs\Shopify\CreateShopifySalesChannelJob;
 use App\Jobs\Shopify\CreateStorefrontAccessTokenJob;
 use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
-use App\Models\Brand\BrandStoreSettings;
-use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
-use App\Services\Shopify\ShopifyTeardownService;
+use App\Services\Shopify\ShopifyDisconnectService;
 use App\Services\Shopify\ShopProfileAutoFillService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Client\ConnectionException;
@@ -35,7 +32,7 @@ class ShopifyIntegrationController extends ApiController
     use NormalizesShopDomain, ResolveCurrentProfessional;
 
     public function __construct(
-        private readonly ShopifyTeardownService $teardownService,
+        private readonly ShopifyDisconnectService $disconnectService,
     ) {}
 
     private function currentShopifyIntegrationForBrand(string $brandProfessionalId): ?ProfessionalIntegration
@@ -343,60 +340,15 @@ class ShopifyIntegrationController extends ApiController
 
         $actorProfessional = $this->currentProfessional($request);
 
-        $integration = $this->currentShopifyIntegrationForBrand($targetBrandId);
-
-        $teardownSummary = null;
-        if ($integration && ! empty($integration->access_token)) {
-            try {
-                $teardownSummary = $this->teardownService->teardownForIntegration($integration);
-            } catch (\Throwable $e) {
-                // The teardown service already logs per-step failures; this
-                // catch only fires on a truly unexpected exception. We keep
-                // going so the local disconnect still runs — leaving the
-                // brand half-disconnected (Shopify side still present but
-                // Partna thinks it's gone) is worse than orphaning a few
-                // Shopify-side artifacts we can't re-reach.
-                Log::error('Shopify teardown threw unexpectedly; continuing with local disconnect', [
-                    'actor_professional_id' => (string) $actorProfessional->id,
-                    'brand_professional_id' => $targetBrandId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        // Affiliate curated selections only make sense while this brand has
-        // a catalog to curate from. Blow them away so the affiliates don't
-        // end up with dangling GIDs pointing at deleted products.
-        $deletedSelections = AffiliateProductSelection::query()
-            ->where('brand_professional_id', $targetBrandId)
-            ->delete();
-
-        ProfessionalIntegration::query()
-            ->where('professional_id', $targetBrandId)
-            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-            ->delete();
-
-        // Clear all wizard progress and reset brand status so the setup wizard
-        // starts fresh if the brand reconnects.
-        BrandStoreSettings::clearWizardProgress($targetBrandId);
-        BrandProfile::where('professional_id', $targetBrandId)
-            ->update([
-                'brand_status' => BrandStatus::Onboarding->value,
-                'setup_complete' => false,
-            ]);
-
-        Log::info('Shopify disconnected', [
+        $result = $this->disconnectService->disconnect($targetBrandId, [
             'actor_professional_id' => (string) $actorProfessional->id,
-            'brand_professional_id' => $targetBrandId,
-            'teardown_summary' => $teardownSummary,
-            'deleted_selections' => $deletedSelections,
         ]);
 
         return $this->success([
             'connected' => false,
             'brand_professional_id' => $targetBrandId,
-            'teardown' => $teardownSummary,
-            'selections_deleted' => $deletedSelections,
+            'teardown' => $result['teardown'],
+            'selections_deleted' => $result['selections_deleted'],
         ]);
     }
 

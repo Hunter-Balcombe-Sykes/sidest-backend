@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResync
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\ShopifyDataResyncService;
+use App\Services\Shopify\ShopifyDisconnectService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
@@ -62,7 +63,7 @@ it('returns 404 when professional has no Shopify integration', function () {
     $professional = makeStaffResyncProfessional();
 
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
-    $controller = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService, Mockery::mock(ShopifyDisconnectService::class));
 
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
@@ -76,7 +77,7 @@ it('returns 429 when rate limit is exceeded', function () {
     RateLimiter::hit("shopify-resync:{$integration->id}", 60);
 
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
-    $controller = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService, Mockery::mock(ShopifyDisconnectService::class));
 
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
@@ -98,7 +99,7 @@ it('returns resync result on success', function () {
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
     $resyncService->shouldReceive('resync')->once()->andReturn($resyncResult);
 
-    $controller = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService, Mockery::mock(ShopifyDisconnectService::class));
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
     $data = json_decode($response->getContent(), true);
 
@@ -113,7 +114,7 @@ it('returns 502 when ShopifyDataResyncService throws', function () {
     $resyncService = Mockery::mock(ShopifyDataResyncService::class);
     $resyncService->shouldReceive('resync')->andThrow(new \RuntimeException('Bad token'));
 
-    $controller = new StaffShopifyResyncController($resyncService);
+    $controller = new StaffShopifyResyncController($resyncService, Mockery::mock(ShopifyDisconnectService::class));
     $response = $controller->invoke(Request::create('/', 'POST'), $professional);
 
     expect($response->status())->toBe(502);

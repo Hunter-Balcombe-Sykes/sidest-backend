@@ -12,8 +12,8 @@
 
 ## Progress
 
-- P0: 0 of 5 complete
-- P1: 0 of 13 complete
+- P0: 1 of 5 complete (#SHOP-1)
+- P1: 3 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2)
 - P2: 0 of 13 complete
 - P3: 0 of 6 complete (defer-by-default per agent memory; build only when a real ticket lands)
 
@@ -55,7 +55,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 ### High-impact bundles (P0/P1)
 
-- [ ] **B1 — Integration status + disconnect mirrors.** #SQUARE-1, #FRESHA-1, #SHOP-1, #SHOP-2. ~3–4h. All four are "create a staff endpoint that calls the existing service the self-service controller already uses." Same pattern, same auth tier (admin write for disconnect/re-register, any-staff for status). One Pest sweep across all four. **Don't pull in:** #PAYOUT-1 (Stripe field-mapping risk — keep standalone).
+- [x] **B1 — Integration status + disconnect mirrors.** #SQUARE-1, #FRESHA-1, #SHOP-1, #SHOP-2. ~3–4h. All four are "create a staff endpoint that calls the existing service the self-service controller already uses." Same pattern, same auth tier (admin write for disconnect/re-register, any-staff for status). One Pest sweep across all four. **Don't pull in:** #PAYOUT-1 (Stripe field-mapping risk — keep standalone).
 
 - [ ] **B2 — Read-only inspector mirrors.** #GDPR-1, #ENQUIRY-1, #BRAND-SETUP-1, #BRAND-DESIGN-1, #COLLECTION-1, #GBP-1, #BOOK-1, #ANALYTICS-1, #CATALOG-1, #STRIPE-PM-1, #AFF-SEL-1 (read-only part). ~6–8h. All "GET endpoint exposing the same payload the brand sees." Mechanical mirror — wire the controller, return the existing service's response, write a Pest test that hits the endpoint as staff. Same review surface (no writes, no side-effects).
 
@@ -111,7 +111,7 @@ These are best in their own session because bundling would force unrelated archi
         // staff has none of these — only commission-payout retry exists
         ```
 
-- [ ] **#SHOP-1** · P0 — Staff Shopify webhook re-register
+- [x] **#SHOP-1** · P0 — Staff Shopify webhook re-register
     - **Where:** extend `app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffShopifyResyncController.php`; mirror `app/Http/Controllers/Api/Professional/ShopifyIntegration/ShopifyIntegrationController::registerWebhooks`.
     - **Affects:** Brands whose order webhooks have drifted (Shopify topic-version bump, scope re-grant, etc.). Today the only fix is asking the brand to click a button in their dashboard.
     - **Effort:** S (~1–2h)
@@ -417,7 +417,7 @@ These are best in their own session because bundling would force unrelated archi
         // staff side: zero equivalents
         ```
 
-- [ ] **#SHOP-2** · P1 — Staff-side Shopify disconnect
+- [x] **#SHOP-2** · P1 — Staff-side Shopify disconnect
     - **Where:** extend `StaffShopifyResyncController` (rename to a more general staff Shopify integration controller, or add sibling).
     - **Affects:** Cleanup after a brand walks away mid-onboarding without disconnecting.
     - **Effort:** S (~1h)
@@ -433,7 +433,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::post('/shopify/disconnect', [ShopifyIntegrationController::class, 'disconnect']);
         ```
 
-- [ ] **#FRESHA-1** · P1 — Read-only Fresha integration status + force disconnect
+- [x] **#FRESHA-1** · P1 — Read-only Fresha integration status + force disconnect
     - **Where:** new `app/Http/Controllers/Api/Staff/StaffSite/StaffFreshaController.php`; mirror `FreshaIntegrationController::status` + `disconnect`. Gate on `feature:fresha_sync`.
     - **Affects:** Fresha account disputes ("which Partna account is connected to my Fresha?").
     - **Effort:** S (~1h)
@@ -450,7 +450,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::post('/fresha/disconnect', [FreshaIntegrationController::class, 'disconnect']);
         ```
 
-- [ ] **#SQUARE-1** · P1 — Read-only Square integration status + force disconnect
+- [x] **#SQUARE-1** · P1 — Read-only Square integration status + force disconnect
     - **Where:** new `app/Http/Controllers/Api/Staff/StaffSite/StaffSquareController.php`; mirror `SquareIntegrationController::status` + `disconnect`. Gate on `feature:square_sync`.
     - **Affects:** Same shape as Fresha — stale OAuth cleanup.
     - **Effort:** S (~1h)

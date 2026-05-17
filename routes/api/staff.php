@@ -21,10 +21,12 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettings
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffFreshaController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffNotificationEmailPolicyController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffSiteController;
+use App\Http\Controllers\Api\Staff\StaffSite\StaffSquareController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffStatsController;
 use Illuminate\Support\Facades\Route;
 
@@ -123,6 +125,16 @@ Route::prefix('staff')
         // Data export — staff-triggered. ?send_to=staff requires admin role
         // (enforced in the controller). Same 30-min dedup window as self-service.
         Route::post('/professionals/{professional}/data-export', [StaffDataExportController::class, 'store']);
+
+        // Integration status — read-only mirrors of the brand-facing status endpoints.
+        // Gated behind the same feature flag as the self-service routes so staff can't
+        // see status for an integration the platform doesn't expose yet.
+        Route::middleware('feature:square_sync')->group(function () {
+            Route::get('/professionals/{professional}/square/status', [StaffSquareController::class, 'status']);
+        });
+        Route::middleware('feature:fresha_sync')->group(function () {
+            Route::get('/professionals/{professional}/fresha/status', [StaffFreshaController::class, 'status']);
+        });
     });
 
 // Authorised Staff Admin Editing
@@ -230,6 +242,22 @@ Route::prefix('staff')
 
         // Trigger Shopify resync for a brand (admin only)
         Route::post('/professionals/{professional}/integrations/shopify/resync', [StaffShopifyResyncController::class, 'invoke']);
+
+        // Sever a stale Shopify connection on a brand's behalf. Runs the same teardown +
+        // local cleanup the brand-facing disconnect performs, via ShopifyDisconnectService.
+        Route::post('/professionals/{professional}/integrations/shopify/disconnect', [StaffShopifyResyncController::class, 'disconnect']);
+
+        // Re-arm order webhooks after drift (topic-version bump, manual delete in Shopify
+        // admin). Dispatches the same RegisterShopifyWebhooksJob the brand endpoint uses.
+        Route::post('/professionals/{professional}/integrations/shopify/register-webhooks', [StaffShopifyResyncController::class, 'registerWebhooks']);
+
+        // Square / Fresha force-disconnect — admin write, feature-gated to match self-service.
+        Route::middleware('feature:square_sync')->group(function () {
+            Route::post('/professionals/{professional}/square/disconnect', [StaffSquareController::class, 'disconnect']);
+        });
+        Route::middleware('feature:fresha_sync')->group(function () {
+            Route::post('/professionals/{professional}/fresha/disconnect', [StaffFreshaController::class, 'disconnect']);
+        });
 
         // Override brand commission rate and payout hold days (admin only)
         Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
