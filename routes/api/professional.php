@@ -422,10 +422,16 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::put('/stripe/payment-method/preference', [StripeConnectController::class, 'setPaymentMethodPreference']);
         Route::get('/stripe/payouts', [StripeConnectController::class, 'payouts']);
         // /upcoming registered BEFORE /{payoutId} so the literal segment wins over the placeholder.
-        Route::get('/stripe/payouts/upcoming', [StripeConnectController::class, 'upcomingPayouts']);
+        // affiliate.only — balance + upcoming payouts are Stripe Connect data scoped to
+        // affiliate accounts. Role enforcement lives at the middleware layer (allowlist),
+        // not inline (exclusion) — keeps the doctrine consistent with brand.only-gated routes
+        // and avoids the silent null/unknown-type passthrough an inline check would have.
+        Route::get('/stripe/payouts/upcoming', [StripeConnectController::class, 'upcomingPayouts'])
+            ->middleware('affiliate.only');
         Route::get('/stripe/payouts/{payoutId}', [StripeConnectController::class, 'payoutDetail']);
         Route::get('/stripe/transactions', [StripeConnectController::class, 'transactions']);
-        Route::get('/stripe/balance', [StripeConnectController::class, 'balance']);
+        Route::get('/stripe/balance', [StripeConnectController::class, 'balance'])
+            ->middleware('affiliate.only');
         Route::get('/stripe/exports/{type}.{format}', [StripeConnectController::class, 'export'])
             ->where('format', 'csv|xlsx');
 

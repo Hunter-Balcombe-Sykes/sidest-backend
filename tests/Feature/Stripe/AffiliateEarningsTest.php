@@ -124,16 +124,10 @@ it('balance ignores non-AUD currency buckets', function () {
     expect($data['balance']['available_cents'])->toBe(5000);
 });
 
-it('balance returns 403 for a brand', function () {
-    $brand = earnings_seedPro('brand-bal', 'brand', 'acct_brand');
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->balance = Mockery::mock();
-    $stripe->balance->shouldNotReceive('retrieve');
-
-    $response = earnings_makeController($stripe)->balance(earnings_makeRequest($brand));
-    expect($response->status())->toBe(403);
-});
+// Brand-403 role check moved to `affiliate.only` middleware. Route-coverage is
+// asserted by StripeAffiliateRouteGuardTest; middleware behaviour by
+// EnsureAffiliateAccountTest. A unit test that bypasses middleware is meaningless,
+// matching the precedent set in BrandRoleGuardTest.php.
 
 it('balance returns zeros gracefully when affiliate has no Stripe account', function () {
     $aff = earnings_seedPro('aff-noacct', 'influencer', null);
@@ -200,16 +194,5 @@ it('upcomingPayouts filters to pending and in_transit statuses only', function (
     expect(collect($data['payouts'])->pluck('id')->all())->toBe(['po_pending', 'po_transit']);
 });
 
-it('upcomingPayouts returns 403 for a brand', function () {
-    $brand = earnings_seedPro('brand-up', 'brand', 'acct_brand_up');
-
-    $stripe = Mockery::mock(StripeClient::class);
-    $stripe->payouts = Mockery::mock();
-    $stripe->payouts->shouldNotReceive('all');
-
-    $request = Request::create('/api/stripe/payouts/upcoming', 'GET');
-    $request->attributes->set('professional', $brand);
-
-    $response = earnings_makeController($stripe)->upcomingPayouts($request);
-    expect($response->status())->toBe(403);
-});
+// Brand-403 case moved to the affiliate.only middleware — see comment above the
+// balance brand test for context.

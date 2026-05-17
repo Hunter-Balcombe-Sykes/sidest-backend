@@ -545,10 +545,6 @@ class StripeConnectController extends Controller
     {
         $pro = $request->attributes->get('professional');
 
-        if (($pro->professional_type ?? null) === 'brand') {
-            return response()->json(['error' => 'affiliate_only'], 403);
-        }
-
         $cacheKey = 'stripe:balance:'.$pro->id;
         $payload = $this->cacheLock->rememberLocked($cacheKey, 60, function () use ($pro) {
             return [
@@ -569,10 +565,6 @@ class StripeConnectController extends Controller
     public function upcomingPayouts(Request $request): JsonResponse
     {
         $pro = $request->attributes->get('professional');
-
-        if (($pro->professional_type ?? null) === 'brand') {
-            return response()->json(['error' => 'affiliate_only'], 403);
-        }
 
         $cacheKey = 'stripe:upcoming_payouts:'.$pro->id;
         $rows = $this->cacheLock->rememberLocked(
