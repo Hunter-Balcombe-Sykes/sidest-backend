@@ -1,45 +1,132 @@
 <?php
 
+use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeBillingService;
+use Illuminate\Support\Str;
+use Stripe\StripeClient;
 
-it('can be instantiated', function () {
-    // StripeBillingService reads config('services.stripe.secret_key') in constructor
+beforeEach(function () {
     config(['services.stripe.secret_key' => 'sk_test_fake']);
-
-    $service = new StripeBillingService;
-    expect($service)->toBeInstanceOf(StripeBillingService::class);
+    attachTestSchemas();
+    setupProfessionalsTable();
 });
 
-// Under v2 Option A, core.professionals.stripe_customer_id is dropped. The v1 "cache the
-// customer id on the professional, skip Stripe on subsequent calls" optimisation is gone;
-// ensureStripeCustomer now leans on Stripe's idempotency_key window to dedupe within 24h,
-// and longer-term tracking lives on billing.subscriptions.stripe_customer_id which is
-// written by the subscription-created webhook handler. See StripeIdempotencyKeysTest for
-// the deterministic key-format coverage.
-it('ensureStripeCustomer always calls Stripe under v2 (cache column dropped)', function () {
-    config(['services.stripe.secret_key' => 'sk_test_fake']);
+/**
+ * Build a real (persisted) professional so Eloquent has a row to update when
+ * StripeBillingService writes the customer ID back. Using `new` instead would
+ * silently no-op the save().
+ */
+function billingTest_makeProfessional(): Professional
+{
+    $id = (string) Str::uuid();
 
-    $professional = new \App\Models\Core\Professional\Professional;
-    $professional->id = (string) \Illuminate\Support\Str::uuid();
-    $professional->primary_email = 'billing-v2@example.test';
-    $professional->display_name = 'V2 Billing Test';
+    return Professional::create([
+        'id' => $id,
+        'handle' => "h-{$id}",
+        'handle_lc' => "h-{$id}",
+        'display_name' => "Pro {$id}",
+        'primary_email' => "{$id}@example.test",
+        'professional_type' => 'brand',
+        'status' => 'active',
+    ]);
+}
+
+function billingTest_injectStripeClient(StripeBillingService $service, StripeClient $client): void
+{
+    $prop = (new ReflectionClass($service))->getProperty('stripe');
+    $prop->setAccessible(true);
+    $prop->setValue($service, $client);
+}
+
+it('can be instantiated', function () {
+    expect(new StripeBillingService)->toBeInstanceOf(StripeBillingService::class);
+});
+
+it('ensureStripeCustomer creates and persists the customer ID on first call', function () {
+    $professional = billingTest_makeProfessional();
 
     $customersSpy = Mockery::mock();
     $customersSpy->shouldReceive('create')
         ->once()
-        ->withArgs(function (array $params, array $opts) use ($professional) {
-            return ($opts['idempotency_key'] ?? null) === "customer_{$professional->id}"
-                && ($params['email'] ?? null) === 'billing-v2@example.test';
-        })
-        ->andReturn((object) ['id' => 'cus_v2_returned']);
+        ->andReturn((object) ['id' => 'cus_first_call']);
 
-    $stripeClient = Mockery::mock(\Stripe\StripeClient::class);
+    $stripeClient = Mockery::mock(StripeClient::class);
     $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
 
     $service = new StripeBillingService;
-    $reflProp = (new ReflectionClass($service))->getProperty('stripe');
-    $reflProp->setAccessible(true);
-    $reflProp->setValue($service, $stripeClient);
+    billingTest_injectStripeClient($service, $stripeClient);
 
-    expect($service->ensureStripeCustomer($professional))->toBe('cus_v2_returned');
+    $returned = $service->ensureStripeCustomer($professional);
+
+    expect($returned)->toBe('cus_first_call');
+    expect($professional->fresh()->stripe_billing_customer_id)->toBe('cus_first_call');
+});
+
+it('ensureStripeCustomer reuses the persisted ID and never calls Stripe again', function () {
+    $professional = billingTest_makeProfessional();
+    $professional->update(['stripe_billing_customer_id' => 'cus_already_stored']);
+
+    // If reuse works, Stripe is never invoked. Mocking with `shouldNotReceive`
+    // makes a regression that bypasses the cache loud instead of silent.
+    $customersSpy = Mockery::mock();
+    $customersSpy->shouldNotReceive('create');
+
+    $stripeClient = Mockery::mock(StripeClient::class);
+    $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
+
+    $service = new StripeBillingService;
+    billingTest_injectStripeClient($service, $stripeClient);
+
+    expect($service->ensureStripeCustomer($professional))->toBe('cus_already_stored');
+});
+
+it('ensureStripeCustomer makes exactly one Stripe call across two invocations on a fresh professional', function () {
+    $professional = billingTest_makeProfessional();
+
+    // The combined assertion that proves the whole reuse story: across two
+    // ensureStripeCustomer() calls on the same fresh professional, Stripe is
+    // hit precisely once. First call creates + persists, second call reads
+    // the column and short-circuits.
+    $customersSpy = Mockery::mock();
+    $customersSpy->shouldReceive('create')
+        ->once()
+        ->andReturn((object) ['id' => 'cus_one_and_only']);
+
+    $stripeClient = Mockery::mock(StripeClient::class);
+    $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
+
+    $service = new StripeBillingService;
+    billingTest_injectStripeClient($service, $stripeClient);
+
+    expect($service->ensureStripeCustomer($professional))->toBe('cus_one_and_only');
+    expect($service->ensureStripeCustomer($professional->fresh()))->toBe('cus_one_and_only');
+});
+
+it('createBillingPortalSession opens a portal for the stored customer', function () {
+    $professional = billingTest_makeProfessional();
+    $professional->update(['stripe_billing_customer_id' => 'cus_portal_test']);
+
+    $customersSpy = Mockery::mock();
+    $customersSpy->shouldNotReceive('create');
+
+    $portalSessionsSpy = Mockery::mock();
+    $portalSessionsSpy->shouldReceive('create')
+        ->once()
+        ->withArgs(function (array $params) {
+            expect($params['customer'])->toBe('cus_portal_test');
+            expect($params['return_url'])->toBe('https://example.test/return');
+
+            return true;
+        })
+        ->andReturn((object) ['url' => 'https://billing.stripe.test/p_abc']);
+
+    $stripeClient = Mockery::mock(StripeClient::class);
+    $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
+    $stripeClient->billingPortal = (object) ['sessions' => $portalSessionsSpy];
+
+    $service = new StripeBillingService;
+    billingTest_injectStripeClient($service, $stripeClient);
+
+    expect($service->createBillingPortalSession($professional, 'https://example.test/return'))
+        ->toBe('https://billing.stripe.test/p_abc');
 });

@@ -28,7 +28,7 @@ beforeEach(function () {
     foreach ([
         'stripe_connect_account_id TEXT',
         "stripe_connect_status TEXT DEFAULT 'not_connected'",
-        'stripe_customer_id TEXT',
+        'stripe_billing_customer_id TEXT',
         'stripe_payment_method_id TEXT',
         'country_code TEXT',
         'primary_email TEXT',
@@ -121,26 +121,20 @@ it('ensureStripeCustomer passes deterministic idempotency_key to Stripe', functi
     $customerId = $service->ensureStripeCustomer($professional);
 
     expect($customerId)->toBe('cus_fake_abc');
-    // Under v2 Option A, stripe_customer_id is no longer cached on core.professionals (column
-    // dropped). The deterministic idempotency key ensures Stripe returns the same customer
-    // within the 24h dedup window; longer-term tracking lives on billing.subscriptions.
+    // The idempotency key is the belt-and-braces guarantee against duplicate
+    // customers if a race slips through the column-reuse short-circuit (e.g. two
+    // simultaneous first-time checkouts before either persist returns). Stripe
+    // returns the same Customer for both calls within its 24h dedup window.
 });
 
-it('ensureStripeCustomer relies on Stripe idempotency for dedup (no professional-side cache under v2)', function () {
+it('ensureStripeCustomer reuses the persisted column on subsequent calls (no second Stripe round-trip)', function () {
     $professional = idempotencyTest_makeProfessional();
 
-    // Under v2, calling ensureStripeCustomer twice in a row hits Stripe twice with the
-    // same idempotency_key; Stripe returns the original Customer on the second call.
-    // Test verifies the call-twice-with-same-key pattern via the spy.
+    // First call creates + persists; second call must short-circuit on the column.
     $customersSpy = Mockery::mock();
     $customersSpy->shouldReceive('create')
-        ->twice()
-        ->withArgs(function (array $params, array $opts = []) use ($professional) {
-            expect($opts['idempotency_key'])->toBe("customer_{$professional->id}");
-
-            return true;
-        })
-        ->andReturn((object) ['id' => 'cus_dedup_via_stripe']);
+        ->once()
+        ->andReturn((object) ['id' => 'cus_persisted_then_reused']);
 
     $stripeClient = Mockery::mock(StripeClient::class);
     $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
@@ -150,8 +144,8 @@ it('ensureStripeCustomer relies on Stripe idempotency for dedup (no professional
     $reflProp->setAccessible(true);
     $reflProp->setValue($service, $stripeClient);
 
-    expect($service->ensureStripeCustomer($professional))->toBe('cus_dedup_via_stripe');
-    expect($service->ensureStripeCustomer($professional))->toBe('cus_dedup_via_stripe');
+    expect($service->ensureStripeCustomer($professional))->toBe('cus_persisted_then_reused');
+    expect($service->ensureStripeCustomer($professional->fresh()))->toBe('cus_persisted_then_reused');
 });
 
 // ── StripeBillingService::createCheckoutSession ────────────────────────────

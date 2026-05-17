@@ -195,6 +195,7 @@ function setupProfessionalsTable(): void
         location_country TEXT NULL,
         stripe_connect_account_id TEXT NULL,
         stripe_connect_status TEXT NULL,
+        stripe_billing_customer_id TEXT NULL,
         stripe_payment_method_id TEXT NULL,
         stripe_payment_method_brand TEXT NULL,
         stripe_payment_method_last4 TEXT NULL,

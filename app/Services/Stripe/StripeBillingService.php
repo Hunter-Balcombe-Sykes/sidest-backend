@@ -20,15 +20,17 @@ class StripeBillingService
     }
 
     /**
-     * Ensure the professional has a Stripe Customer.
-     *
-     * TODO[stripe-v2]: stripe_customer_id column dropped from professionals.
-     * Each call currently creates a new Stripe Customer (deduplicated within the
-     * idempotency window by professional ID). Phase 3 will add proper storage
-     * for the customer ID so it can be reused across calls.
+     * Ensure the professional has a platform-side Stripe Customer for SaaS billing.
+     * Reuses the persisted ID if present; otherwise creates a new Customer and
+     * writes it back. The idempotency key is a secondary safety net for the
+     * narrow race where two simultaneous first-time calls both see a NULL column.
      */
     public function ensureStripeCustomer(Professional $professional): string
     {
+        if ($professional->stripe_billing_customer_id) {
+            return $professional->stripe_billing_customer_id;
+        }
+
         $customer = $this->stripe->customers->create([
             'email' => $professional->primary_email,
             'name' => $professional->display_name,
@@ -37,6 +39,8 @@ class StripeBillingService
                 'professional_type' => $professional->professional_type,
             ],
         ], ['idempotency_key' => "customer_{$professional->id}"]);
+
+        $professional->update(['stripe_billing_customer_id' => $customer->id]);
 
         return $customer->id;
     }
@@ -93,13 +97,20 @@ class StripeBillingService
 
     /**
      * Create a Stripe Billing Portal session for self-service management.
-     *
-     * TODO[stripe-v2]: stripe_customer_id column dropped from professionals.
-     * Phase 3 must re-implement customer ID lookup before this can work.
+     * Resolves (and lazily creates) the platform billing Customer before
+     * opening the portal, so a professional who reaches the portal without
+     * ever completing checkout still gets a valid session.
      */
     public function createBillingPortalSession(Professional $professional, string $returnUrl): string
     {
-        throw new \RuntimeException('Billing portal unavailable pending v2 customer ID storage (Phase 3).');
+        $customerId = $this->ensureStripeCustomer($professional);
+
+        $session = $this->stripe->billingPortal->sessions->create([
+            'customer' => $customerId,
+            'return_url' => $returnUrl,
+        ]);
+
+        return $session->url;
     }
 
     /**

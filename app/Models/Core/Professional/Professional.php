@@ -41,6 +41,7 @@ class Professional extends BaseModel
     protected $hidden = [
         'auth_user_id',
         'stripe_connect_account_id',
+        'stripe_billing_customer_id',
         'stripe_payment_method_id',
         'stripe_commission_funding_mode',
         'deletion_token_hash',
@@ -82,6 +83,9 @@ class Professional extends BaseModel
         'stripe_payment_method_last4',
         'stripe_commission_funding_mode',
         'payout_method',
+
+        // Platform-side SaaS subscription billing — separate identity from Connect.
+        'stripe_billing_customer_id',
 
         // Phase 4 — multi-PM (BECS + card) with preferred selection. Legacy stripe_payment_method_*
         // columns above continue to mirror the current preferred PM as a snapshot for back-compat.
