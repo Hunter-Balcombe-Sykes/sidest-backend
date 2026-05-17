@@ -506,7 +506,7 @@ These are best in their own session because bundling would force unrelated archi
     - **Plain English:** Admin can suspend a wave of fraud accounts in one request.
     - **Evidence:** N/A — net-new.
 
-- [ ] **#WEBHOOK-1** · P2 — Shopify event-replay endpoint
+- [x] **#WEBHOOK-1** · P2 — Shopify event-replay endpoint
     - **Where:** new `app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffShopifyEventReplayController.php`.
     - **Affects:** Stuck commission rollups for a single order.
     - **Effort:** M (~2–3h)
