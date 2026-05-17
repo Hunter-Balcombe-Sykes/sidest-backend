@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\ResolveEmbeddedProfessional;
 use App\Http\Requests\Api\Internal\Embedded\UpdateProductSettingsRequest;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Retail\BrandStoreSettings;
@@ -25,6 +26,8 @@ use Illuminate\Support\Facades\Log;
 // token and injects embedded_professional_id into the request.
 class EmbeddedProductSettingsController extends ApiController
 {
+    use ResolveEmbeddedProfessional;
+
     public function __construct(
         private readonly BrandCatalogService $catalog,
         private readonly CacheLockService $cacheLock,
@@ -53,7 +56,9 @@ class EmbeddedProductSettingsController extends ApiController
      */
     public function show(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        // Read-only — ID-only resolution keeps the cache-hit path from loading
+        // core.professionals.
+        $professionalId = $this->currentEmbeddedProfessionalId($request);
         $productGid = (string) $request->query('product_gid', '');
 
         if ($productGid === '') {
@@ -95,7 +100,8 @@ class EmbeddedProductSettingsController extends ApiController
      */
     public function update(UpdateProductSettingsRequest $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
         $productGid = (string) $request->input('product_gid');
         $field = (string) $request->input('field');
         $value = $request->input('value');
@@ -108,6 +114,12 @@ class EmbeddedProductSettingsController extends ApiController
         if (! $integration) {
             return $this->error('No Shopify integration found.', 404);
         }
+
+        // Gate on the loaded integration row (not a skeleton) so the policy
+        // sees the actual professional_id rather than one inferred from the
+        // request — matches the IntegrationPolicy::manage pattern used by the
+        // dashboard Shopify endpoints.
+        $this->authorizeForUser($professional, 'manage', $integration);
 
         try {
             match ($field) {

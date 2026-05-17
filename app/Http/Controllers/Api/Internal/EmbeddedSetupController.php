@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Internal;
 use App\Enums\BrandStatus;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesShopDomain;
+use App\Http\Controllers\Concerns\ResolveEmbeddedProfessional;
 use App\Http\Requests\Api\Internal\Embedded\ProvisionDomainTxtRequest;
 use App\Http\Requests\Api\Internal\Embedded\ProvisionShopifyIntegrationRequest;
 use App\Http\Requests\Api\Internal\Embedded\SaveBusinessDetailsRequest;
@@ -48,6 +49,7 @@ use Illuminate\Support\Facades\Log;
 class EmbeddedSetupController extends ApiController
 {
     use NormalizesShopDomain;
+    use ResolveEmbeddedProfessional;
 
     public function __construct(
         private readonly ProfessionalCacheService $cache,
@@ -65,9 +67,10 @@ class EmbeddedSetupController extends ApiController
      */
     public function brandProfile(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-
-        $professional = Professional::with(['brandProfile', 'site'])->findOrFail($professionalId);
+        // Trait resolves + caches the Professional; load() pulls brandProfile/site
+        // on the cached instance without re-querying core.professionals.
+        $professional = $this->currentEmbeddedProfessional($request)->load(['brandProfile', 'site']);
+        $professionalId = (string) $professional->id;
         $brandProfile = $professional->brandProfile;
         $site = $professional->site;
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
@@ -142,8 +145,13 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        // Authorise via BrandResourcePolicy::update on a BrandProfile skeleton.
+        // BrandProfile is the resource that's writable here; the Professional
+        // update is keyed by the same JWT-bound id and gates on the same owner.
+        $this->authorizeForUser($professional, 'update', new BrandProfile(['professional_id' => $professionalId]));
 
         $proUpdates = [];
         if (isset($data['name'])) {
@@ -179,8 +187,10 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandProfile(['professional_id' => $professionalId]));
 
         BrandProfile::updateOrCreate(
             ['professional_id' => $professionalId],
@@ -209,8 +219,15 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        // setup_complete writes BrandProfile; everything else writes BrandStoreSettings.
+        // Authorise against the exact resource that will be mutated.
+        $resourceSkeleton = $data['key'] === 'setup_complete'
+            ? new BrandProfile(['professional_id' => $professionalId])
+            : new BrandStoreSettings(['professional_id' => $professionalId]);
+        $this->authorizeForUser($professional, 'update', $resourceSkeleton);
 
         $payload = match ($data['key']) {
             'default_commission_rate' => ['default_commission_rate' => (float) $data['value']],
@@ -247,8 +264,10 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandStoreSettings(['professional_id' => $professionalId]));
 
         $otherFields = [];
         if (array_key_exists('storefront_id', $data)) {
@@ -283,8 +302,10 @@ class EmbeddedSetupController extends ApiController
      */
     public function confirmHydrogenInstall(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandStoreSettings(['professional_id' => $professionalId]));
 
         BrandStoreSettings::updateOrCreate(
             ['professional_id' => $professionalId],
@@ -308,7 +329,9 @@ class EmbeddedSetupController extends ApiController
      */
     public function overview(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        // ID-only — overview is fully cached; loading Professional here would
+        // turn a cache hit into a DB read. See EmbeddedSetupOverviewCacheTest.
+        $professionalId = $this->currentEmbeddedProfessionalId($request);
 
         $payload = $this->cacheLock->rememberLocked(
             CacheKeyGenerator::embeddedSetupOverview($professionalId),
@@ -410,8 +433,8 @@ class EmbeddedSetupController extends ApiController
      */
     public function embeddedProducts(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
         $defaultRate = (float) ($storeSettings?->default_commission_rate ?? 0);
 
@@ -462,7 +485,16 @@ class EmbeddedSetupController extends ApiController
      */
     public function syncDesign(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        // Authorise on a skeleton so the gate fires even when no integration
+        // row exists yet — defence-in-depth against a future endpoint reading
+        // professional_id from a non-attribute source.
+        $this->authorizeForUser($professional, 'manage', new ProfessionalIntegration([
+            'professional_id' => $professionalId,
+            'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        ]));
 
         $integration = ProfessionalIntegration::query()
             ->where('professional_id', $professionalId)
@@ -490,8 +522,10 @@ class EmbeddedSetupController extends ApiController
      */
     public function deployNow(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandStoreSettings(['professional_id' => $professionalId]));
 
         $storeSettings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
@@ -516,7 +550,7 @@ class EmbeddedSetupController extends ApiController
      */
     public function domainStatus(Request $request): JsonResponse
     {
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
+        $professionalId = $this->currentEmbeddedProfessionalId($request);
 
         $settings = BrandStoreSettings::where('professional_id', $professionalId)->first();
 
@@ -550,8 +584,10 @@ class EmbeddedSetupController extends ApiController
         // site subdomain — never the request input — for the CNAME hostname.
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandStoreSettings(['professional_id' => $professionalId]));
 
         // Always derive subdomain from the canonical site record — never trust client input.
         $site = Site::where('professional_id', $professionalId)->first();
@@ -601,8 +637,10 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        $this->authorizeForUser($professional, 'update', new BrandStoreSettings(['professional_id' => $professionalId]));
 
         $site = Site::where('professional_id', $professionalId)->first();
         if (! $site || ! $site->subdomain) {
@@ -652,8 +690,17 @@ class EmbeddedSetupController extends ApiController
     {
         $data = $request->validated();
 
-        $professionalId = (string) $request->attributes->get('embedded_professional_id');
-        $professional = Professional::findOrFail($professionalId);
+        $professional = $this->currentEmbeddedProfessional($request);
+        $professionalId = (string) $professional->id;
+
+        // Authorise on a skeleton — the gate fires before we go anywhere near
+        // Shopify Admin API or the DB write. Mirrors the manage-ability pattern
+        // already used by dashboard Shopify endpoints.
+        $this->authorizeForUser($professional, 'manage', new ProfessionalIntegration([
+            'professional_id' => $professionalId,
+            'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
+        ]));
+
         // Shop domain comes from the JWT `dest` claim, stashed by VerifyShopifySessionToken.
         // The legacy X-Shopify-Shop header was removed when the static-key auth path
         // was deleted — trusting it would re-introduce the cross-tenant compromise risk

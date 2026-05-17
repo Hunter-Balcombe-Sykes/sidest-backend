@@ -14,12 +14,22 @@ use Mockery\MockInterface;
 
 beforeEach(function () {
     Cache::flush();
+    setupProfessionalsTable();
     setupProfessionalIntegrationsTable();
     setupBrandStoreSettingsTable();
 
     $this->professionalId = (string) Str::uuid();
     $this->productId = '9876543210';
     $this->productGid = "gid://shopify/Product/{$this->productId}";
+
+    // update() loads Professional via ResolveEmbeddedProfessional (SEC-3) so
+    // the Policy gate has an actor. Seed the brand row.
+    \Illuminate\Support\Facades\DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $this->professionalId,
+        'display_name' => 'Cache Test Brand',
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
 
     // Use the model's create() so encrypted casts run on access_token /
     // storefront_token (raw inserts would store plaintext in the encrypted col).
