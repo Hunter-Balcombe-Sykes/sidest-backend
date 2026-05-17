@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 // network I/O.
 
 beforeEach(function () {
+    setupProfessionalsTable();
     setupProfessionalIntegrationsTable();
     setupBrandStoreSettingsTable();
     Http::preventStrayRequests();
@@ -22,6 +23,15 @@ beforeEach(function () {
     $this->brandId = (string) Str::uuid();
     $this->productGid = 'gid://shopify/Product/12345';
     $this->shopDomain = 'shop.myshopify.com';
+
+    // ResolveEmbeddedProfessional loads the Professional on every write path
+    // (SEC-3). Seed the brand row so authorisation gates resolve cleanly.
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $this->brandId,
+        'display_name' => 'Test Brand',
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
 });
 
 function seedEmbeddedShopifyIntegration(string $brandId, string $shopDomain, array $metadata = []): void
