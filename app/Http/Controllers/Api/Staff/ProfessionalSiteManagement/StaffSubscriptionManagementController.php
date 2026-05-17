@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Actions\Subscription\CancelProfessionalSubscriptionAction;
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
-use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Resources\SubscriptionResource;
 use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
+use App\Services\Billing\CancelProfessionalSubscriptionAction;
+use App\Services\Billing\ChangeProfessionalPlanAction;
+use App\Services\Billing\ResumeProfessionalSubscriptionAction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 

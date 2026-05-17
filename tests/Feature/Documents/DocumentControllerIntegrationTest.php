@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalDocumentController;
+use App\Http\Controllers\Api\Professional\Account\ProfessionalDocumentController;
 use App\Http\Requests\Api\Professional\Documents\UpdateDocumentRequest;
 use App\Http\Requests\Api\Professional\Documents\UploadDocumentRequest;
 use App\Models\Core\Professional\Professional;

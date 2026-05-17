@@ -1,8 +1,8 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\BrandAffiliateController;
-use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
-use App\Services\Professional\BrandPartnerLinkLifecycleService;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateController;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateInviteController;
+use App\Services\Professional\Brand\BrandPartnerLinkLifecycleService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 

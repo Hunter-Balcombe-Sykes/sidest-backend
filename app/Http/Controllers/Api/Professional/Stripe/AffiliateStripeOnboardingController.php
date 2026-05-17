@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Stripe\OnboardRequest;
+use App\Http\Requests\Api\Professional\Stripe\OnboardRequest;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;

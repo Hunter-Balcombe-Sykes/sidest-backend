@@ -5,7 +5,6 @@ namespace App\Models\Commerce;
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use Database\Factories\Commerce\OrderFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;

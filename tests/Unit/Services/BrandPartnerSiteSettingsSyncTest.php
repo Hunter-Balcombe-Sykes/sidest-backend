@@ -5,8 +5,8 @@ uses(\Tests\TestCase::class);
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
-use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Professional\BrandPartnerSiteSettingsSync;
+use App\Services\Professional\Brand\BrandPartnerLinkService;
+use App\Services\Professional\Brand\BrandPartnerSiteSettingsSync;
 use Illuminate\Support\Str;
 
 beforeEach(function () {

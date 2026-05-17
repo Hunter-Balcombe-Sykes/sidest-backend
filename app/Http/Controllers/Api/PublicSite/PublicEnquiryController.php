@@ -11,7 +11,7 @@ use App\Models\Analytics\LeadSubmission;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\Enquiry;
-use App\Services\Public\PublicSiteResolver;
+use App\Services\PublicSite\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;

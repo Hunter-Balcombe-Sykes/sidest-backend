@@ -3,8 +3,8 @@
 namespace App\Jobs\Stripe;
 
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandPartnerLinkAuditor;
-use App\Services\Professional\BrandPartnerLinkNotifier;
+use App\Services\Professional\Brand\BrandPartnerLinkAuditor;
+use App\Services\Professional\Brand\BrandPartnerLinkNotifier;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;

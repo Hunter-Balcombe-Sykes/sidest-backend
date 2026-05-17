@@ -1,9 +1,9 @@
 <?php
 
+use App\Models\Commerce\CommissionMovement;
+use App\Models\Commerce\CommissionPayout;
+use App\Models\Commerce\CommissionPayoutItem;
 use App\Models\Commerce\Order;
-use App\Models\Retail\CommissionMovement;
-use App\Models\Retail\CommissionPayout;
-use App\Models\Retail\CommissionPayoutItem;
 
 // Audit test: confirms that financial models have no SoftDeletes trait.
 // The purge command (partna:purge-soft-deletes) only touches Customer/Service/SiteMedia;

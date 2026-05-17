@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Api\Webhooks\Stripe\StripeWebhookController;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;

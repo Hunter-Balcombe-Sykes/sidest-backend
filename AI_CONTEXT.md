@@ -146,8 +146,7 @@ Stuck failed batches → POST /staff/commission-payouts/{payout}/retry (staff ad
 ├── tests/                     — Pest framework tests
 ├── docs/api.md                — Comprehensive API reference
 ├── V2_BACKEND_REFERENCE.md    — Detailed per-file V2 role descriptions
-├── PLAN.md                    — V2 platform architecture
-├── V2-REMOVAL-PLAN.md         — V1 removal checklist
+├── docs/plans/v2-platform-plan.md — V2 platform architecture
 └── AI_CONTEXT.md              — This file
 ```
 
@@ -464,7 +463,7 @@ The following V1 code has been deleted. Do NOT recreate these:
 ### Known Issues / Notes
 - Laravel database migrations are intentionally disabled (guarded in composer). All schema changes go through `supabase/migrations/`.
 - Video upload worker queue (`redis_video`) must be running separately from the default queue.
-- Some V1 references may still exist in model relationships and service code that need cleanup (see V2-REMOVAL-PLAN.md Phase 2).
+- Some V1 references may still exist in model relationships and service code that need cleanup.
 
 ---
 

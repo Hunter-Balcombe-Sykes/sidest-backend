@@ -2,7 +2,7 @@
 
 namespace App\Jobs\Stripe;
 
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification;
 use App\Notifications\Brand\BrandPayoutFundingGraceWarningNotification;
 use App\Services\Stripe\CommissionVoidService;

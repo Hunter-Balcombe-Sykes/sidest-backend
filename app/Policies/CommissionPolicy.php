@@ -3,8 +3,8 @@
 namespace App\Policies;
 
 use App\Models\Commerce\BrandAffiliateRollup;
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;

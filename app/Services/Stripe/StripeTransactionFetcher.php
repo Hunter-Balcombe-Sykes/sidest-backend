@@ -2,8 +2,8 @@
 
 namespace App\Services\Stripe;
 
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use Illuminate\Support\Facades\Log;
 use Stripe\StripeClient;
 

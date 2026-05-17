@@ -1,7 +1,7 @@
 <?php
 
-use App\Actions\Subscription\ResumeProfessionalSubscriptionAction;
 use App\Models\Core\Professional\Professional;
+use App\Services\Billing\ResumeProfessionalSubscriptionAction;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

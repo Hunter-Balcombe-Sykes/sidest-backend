@@ -3,14 +3,14 @@
 namespace App\Http\Controllers\Api\Professional\Stripe;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Professional\Stripe\CreatePaymentMethodSetupRequest;
 use App\Http\Requests\Api\Professional\Stripe\ExportsRequest;
+use App\Http\Requests\Api\Professional\Stripe\OnboardRequest;
 use App\Http\Requests\Api\Professional\Stripe\PayoutsRequest;
+use App\Http\Requests\Api\Professional\Stripe\SyncPaymentMethodSessionRequest;
 use App\Http\Requests\Api\Professional\Stripe\TransactionsRequest;
-use App\Http\Requests\Stripe\CreatePaymentMethodSetupRequest;
-use App\Http\Requests\Stripe\OnboardRequest;
-use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
 use App\Http\Resources\Stripe\TransactionResource;
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\ExportService;

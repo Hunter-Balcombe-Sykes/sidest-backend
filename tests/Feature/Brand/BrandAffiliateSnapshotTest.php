@@ -7,7 +7,7 @@
 // This test seeds the new tables and asserts the response keeps the same
 // shape and semantics the dashboard modal already depends on.
 
-use App\Http\Controllers\Api\Professional\BrandAffiliateController;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateController;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;

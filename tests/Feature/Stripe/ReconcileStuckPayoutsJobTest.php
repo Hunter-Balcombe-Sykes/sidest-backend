@@ -1,7 +1,7 @@
 <?php
 
 use App\Jobs\Stripe\ReconcileStuckPayoutsJob;
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

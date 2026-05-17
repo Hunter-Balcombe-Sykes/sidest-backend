@@ -3,9 +3,9 @@
 namespace App\Services\Stripe;
 
 use App\Models\Commerce\CommissionClawback;
+use App\Models\Commerce\CommissionPayout;
+use App\Models\Commerce\CommissionPayoutItem;
 use App\Models\Commerce\Order;
-use App\Models\Retail\CommissionPayout;
-use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Notifications\NotificationPublisher;

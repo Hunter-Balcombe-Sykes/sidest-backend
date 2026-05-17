@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalDataExportController;
-use App\Http\Requests\Professional\RequestDataExportRequest;
+use App\Http\Controllers\Api\Professional\Account\ProfessionalDataExportController;
+use App\Http\Requests\Api\Professional\RequestDataExportRequest;
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;

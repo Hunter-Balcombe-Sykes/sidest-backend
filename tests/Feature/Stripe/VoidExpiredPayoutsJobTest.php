@@ -1,9 +1,9 @@
 <?php
 
 use App\Jobs\Stripe\VoidExpiredPayoutsJob;
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
-use App\Models\Retail\CommissionPayout;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Facades\DB;
@@ -379,7 +379,7 @@ it('fires a T-30 grace warning when void_at is 30 days away', function () {
         fn ($n) => $n->daysRemaining === 30
     );
 
-    $payout = \App\Models\Retail\CommissionPayout::find('p1');
+    $payout = \App\Models\Commerce\CommissionPayout::find('p1');
     expect($payout->grace_notifications_sent)->toContain('T-30');
 });
 

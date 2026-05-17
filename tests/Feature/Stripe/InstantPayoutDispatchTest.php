@@ -2,8 +2,8 @@
 
 use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 use App\Jobs\Stripe\ProcessCommissionPayoutsJob;
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;

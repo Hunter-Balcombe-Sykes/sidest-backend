@@ -2,10 +2,10 @@
 
 namespace App\Services\Cache;
 
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\Service;
-use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 

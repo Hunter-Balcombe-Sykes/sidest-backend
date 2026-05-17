@@ -2,8 +2,8 @@
 
 use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
 use App\Http\Controllers\Api\Professional\Store\BrandStoreSettingsController;
-use App\Models\Retail\BrandStoreSettings;
-use App\Services\Professional\BrandStatusService;
+use App\Models\Brand\BrandStoreSettings;
+use App\Services\Professional\Brand\BrandStatusService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 

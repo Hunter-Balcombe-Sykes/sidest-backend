@@ -1,7 +1,7 @@
 <?php
 
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;

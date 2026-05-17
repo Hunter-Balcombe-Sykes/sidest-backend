@@ -3,7 +3,7 @@
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliateLinkController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Staff\PartnaStaff;
-use App\Services\Professional\BrandPartnerLinkLifecycleService;
+use App\Services\Professional\Brand\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\DTO\DisconnectResult;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;

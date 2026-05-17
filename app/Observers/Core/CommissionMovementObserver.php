@@ -2,7 +2,7 @@
 
 namespace App\Observers\Core;
 
-use App\Models\Retail\CommissionMovement;
+use App\Models\Commerce\CommissionMovement;
 use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use App\Support\Money;

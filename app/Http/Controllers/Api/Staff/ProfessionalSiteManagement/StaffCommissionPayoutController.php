@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

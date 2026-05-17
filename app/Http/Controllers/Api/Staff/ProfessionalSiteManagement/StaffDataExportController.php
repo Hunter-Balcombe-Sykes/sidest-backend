@@ -5,10 +5,10 @@ namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 use App\Exceptions\Gdpr\DataExportInProgressException;
 use App\Exceptions\Gdpr\NoRecipientEmailException;
 use App\Http\Controllers\Api\ApiController;
-use App\Http\Requests\Staff\RequestStaffDataExportRequest;
+use App\Http\Requests\Api\Staff\RequestStaffDataExportRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Staff\PartnaStaff;
-use App\Services\Professional\DataExportService;
+use App\Services\Professional\DataExport\DataExportService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Staff-triggered data export. Same DataExportService as self-service —

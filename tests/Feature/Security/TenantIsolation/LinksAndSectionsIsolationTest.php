@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalLinkBlockController;
 use App\Http\Requests\Api\Professional\Site\IndexLinkBlockRequest;
 use App\Http\Requests\Api\Professional\Site\UpdateLinkBlockRequest;
 use App\Models\Core\Site\Block;

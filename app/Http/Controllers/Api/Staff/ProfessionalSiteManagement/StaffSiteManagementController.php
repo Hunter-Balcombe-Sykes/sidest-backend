@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
-use App\Actions\Site\UpdateSiteAction;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Requests\Api\Staff\ProfessionalSite\StaffUpdateSiteRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\SiteCacheService;
+use App\Services\Site\UpdateSiteAction;
 use Illuminate\Http\JsonResponse;
 
 // V2: Staff updates site settings with force-publish override capability.

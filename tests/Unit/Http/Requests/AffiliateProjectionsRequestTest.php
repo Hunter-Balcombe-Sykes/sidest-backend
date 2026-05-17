@@ -2,7 +2,7 @@
 
 uses(Tests\TestCase::class);
 
-use App\Http\Requests\Professional\Analytics\AffiliateProjectionsRequest;
+use App\Http\Requests\Api\Professional\Analytics\AffiliateProjectionsRequest;
 use Illuminate\Support\Facades\Validator;
 
 it('accepts no params (defaults to adaptive window)', function () {

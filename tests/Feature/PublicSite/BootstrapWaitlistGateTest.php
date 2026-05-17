@@ -3,8 +3,8 @@
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Requests\Api\BootstrapRequest;
 use App\Services\Professional\AccountTypeDefaultsService;
-use App\Services\Professional\BrandAffiliateInviteService;
-use App\Services\Professional\BrandPartnerLinkService;
+use App\Services\Professional\Brand\BrandAffiliateInviteService;
+use App\Services\Professional\Brand\BrandPartnerLinkService;
 use App\Services\Professional\SiteProvisioningService;
 use Illuminate\Support\Facades\DB;
 

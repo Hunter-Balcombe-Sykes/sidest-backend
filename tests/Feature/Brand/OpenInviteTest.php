@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\OpenInviteController;
+use App\Http\Controllers\Api\Professional\Affiliate\OpenInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
@@ -8,8 +8,8 @@ use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\AccountTypeDefaultsService;
-use App\Services\Professional\BrandAffiliateInviteService;
-use App\Services\Professional\BrandPartnerLinkService;
+use App\Services\Professional\Brand\BrandAffiliateInviteService;
+use App\Services\Professional\Brand\BrandPartnerLinkService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

@@ -2,11 +2,11 @@
 
 namespace App\Services\Stripe;
 
+use App\Models\Commerce\CommissionPayout;
+use App\Models\Commerce\CommissionPayoutItem;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
-use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Notifications\NotificationPublisher;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;

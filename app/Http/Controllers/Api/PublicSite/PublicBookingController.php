@@ -9,7 +9,7 @@ use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Services\Customers\ContactCaptureService;
 use App\Services\Notifications\CommerceNotificationService;
-use App\Services\Public\PublicSiteResolver;
+use App\Services\PublicSite\PublicSiteResolver;
 use App\Services\Square\SquareApiClient;
 use App\Services\Square\SquareApiException;
 use Carbon\CarbonImmutable;

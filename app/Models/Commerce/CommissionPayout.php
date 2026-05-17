@@ -4,7 +4,7 @@ namespace App\Models\Commerce;
 
 use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
-use Database\Factories\CommissionPayoutFactory;
+use Database\Factories\Commerce\CommissionPayoutFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;

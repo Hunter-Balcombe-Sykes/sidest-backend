@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalGalleryController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalGalleryController;
 use App\Http\Requests\Api\Professional\ImageGallery\UpdateGalleryImageRequest;
 use App\Models\Core\Site\SiteMedia;
 use Illuminate\Auth\Access\AuthorizationException;

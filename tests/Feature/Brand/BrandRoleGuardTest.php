@@ -1,10 +1,10 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\BrandPartnerController;
+use App\Http\Controllers\Api\Professional\Brand\BrandPartnerController;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandPartnerLinkLifecycleService;
-use App\Services\Professional\BrandPartnerLinkService;
-use App\Services\Professional\BrandPartnerSiteSettingsSync;
+use App\Services\Professional\Brand\BrandPartnerLinkLifecycleService;
+use App\Services\Professional\Brand\BrandPartnerLinkService;
+use App\Services\Professional\Brand\BrandPartnerSiteSettingsSync;
 use Illuminate\Http\Request;
 
 function brandGuardRequest(string $professionalType): Request

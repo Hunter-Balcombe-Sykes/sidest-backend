@@ -18,7 +18,7 @@ use App\Services\Cache\SiteCacheService;
 use App\Services\Media\BrandDesignMediaService;
 use App\Services\Media\ImageVariantService;
 use App\Services\Media\VideoVariantService;
-use App\Services\Professional\BrandStatusService;
+use App\Services\Professional\Brand\BrandStatusService;
 use App\Services\Professional\ConfirmationPreferenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

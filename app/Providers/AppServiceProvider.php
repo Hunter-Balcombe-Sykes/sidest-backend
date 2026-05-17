@@ -72,8 +72,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Site\SiteSubdomainAlias::class, \App\Policies\SitePolicy::class);
         Gate::policy(\App\Models\Core\Site\Enquiry::class, \App\Policies\SitePolicy::class);
         Gate::policy(\App\Models\Analytics\LeadSubmission::class, \App\Policies\SitePolicy::class);
-        Gate::policy(\App\Models\Retail\CommissionPayout::class, \App\Policies\CommissionPolicy::class);
-        Gate::policy(\App\Models\Retail\CommissionMovement::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Commerce\CommissionPayout::class, \App\Policies\CommissionPolicy::class);
+        Gate::policy(\App\Models\Commerce\CommissionMovement::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Commerce\Order::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Commerce\OrderItem::class, \App\Policies\CommissionPolicy::class);
         Gate::policy(\App\Models\Commerce\BrandAffiliateRollup::class, \App\Policies\CommissionPolicy::class);
@@ -82,9 +82,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Professional\BrandAffiliateInvite::class, \App\Policies\BrandPartnerLinkPolicy::class);
         Gate::policy(\App\Models\Core\Professional\Service::class, \App\Policies\ServicePolicy::class);
         Gate::policy(\App\Models\Core\Professional\ServiceCategory::class, \App\Policies\ServicePolicy::class);
-        Gate::policy(\App\Models\Retail\BrandStoreSettings::class, \App\Policies\BrandResourcePolicy::class);
+        Gate::policy(\App\Models\Brand\BrandStoreSettings::class, \App\Policies\BrandResourcePolicy::class);
         Gate::policy(\App\Models\Core\Professional\BrandProfile::class, \App\Policies\BrandResourcePolicy::class);
-        Gate::policy(\App\Models\Retail\BrandTeamMembership::class, \App\Policies\BrandResourcePolicy::class);
+        Gate::policy(\App\Models\Brand\BrandTeamMembership::class, \App\Policies\BrandResourcePolicy::class);
         Gate::policy(\App\Models\Core\Professional\Professional::class, \App\Policies\ProfessionalSelfPolicy::class);
         Gate::policy(\App\Models\Core\Professional\ProfessionalConfirmationPreference::class, \App\Policies\ProfessionalSelfPolicy::class);
         Gate::policy(\App\Models\Core\Professional\WalletCurrencySwitchAudit::class, \App\Policies\ProfessionalSelfPolicy::class);

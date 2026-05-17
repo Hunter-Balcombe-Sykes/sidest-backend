@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
-use App\Http\Requests\Staff\StaffInitiateDeletionRequest;
+use App\Http\Requests\Api\Staff\StaffInitiateDeletionRequest;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
 use App\Models\Core\Staff\PartnaStaff;

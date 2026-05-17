@@ -1,7 +1,7 @@
 <?php
 
 use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
-use App\Models\Retail\BrandStoreSettings;
+use App\Models\Brand\BrandStoreSettings;
 
 uses(\Tests\TestCase::class)->in(__FILE__);
 

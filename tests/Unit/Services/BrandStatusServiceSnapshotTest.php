@@ -2,7 +2,7 @@
 
 use App\Enums\BrandStatus;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandStatusService;
+use App\Services\Professional\Brand\BrandStatusService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;

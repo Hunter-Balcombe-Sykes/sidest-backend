@@ -8,7 +8,7 @@ use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Models\Analytics\LeadSubmission;
 use App\Models\Core\Notifications\EmailSubscription;
-use App\Services\Public\PublicSiteResolver;
+use App\Services\PublicSite\PublicSiteResolver;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;

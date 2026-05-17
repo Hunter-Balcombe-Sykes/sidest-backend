@@ -1,13 +1,13 @@
 <?php
 
 use App\Models\Commerce\BrandAffiliateRollup;
+use App\Models\Commerce\CommissionMovement;
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Models\Commerce\OrderItem;
 use App\Models\Core\Professional\Customer;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionMovement;
-use App\Models\Retail\CommissionPayout;
 
 it('Order points at commerce.orders and casts money columns to int', function () {
     $order = new Order;
@@ -97,7 +97,7 @@ it('CommissionMovement points at commerce.commission_movements (rename deferred 
 });
 
 it('the legacy CommissionMovement continues pointing at commerce.commission_movements', function () {
-    $legacy = new \App\Models\Retail\CommissionMovement;
+    $legacy = new \App\Models\Commerce\CommissionMovement;
 
     expect($legacy->getTable())->toBe('commerce.commission_movements');
 });

@@ -2,12 +2,12 @@
 
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
+use App\Models\Brand\BrandStoreSettings;
+use App\Models\Brand\BrandTeamMembership;
+use App\Models\Commerce\CommissionMovement;
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\ProfessionalDeletionAuditEntry;
-use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\BrandTeamMembership;
-use App\Models\Retail\CommissionMovement;
-use App\Models\Retail\CommissionPayout;
 
 // Subscription — Stripe provider IDs must not be mass-assignable
 it('does not allow stripe_customer_id to be mass-assigned on Subscription', function () {

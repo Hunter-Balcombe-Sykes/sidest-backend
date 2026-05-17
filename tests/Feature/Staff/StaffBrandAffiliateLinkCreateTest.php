@@ -4,7 +4,7 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandAffiliat
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Staff\PartnaStaff;
-use App\Services\Professional\BrandPartnerLinkLifecycleService;
+use App\Services\Professional\Brand\BrandPartnerLinkLifecycleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Http\Controllers\Api\Webhooks\Stripe\StripeConnectWebhookController;
 use Illuminate\Support\Facades\DB;
 use Stripe\Event;
 

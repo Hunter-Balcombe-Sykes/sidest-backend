@@ -1,8 +1,8 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\BrandAffiliateInviteController;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateInviteController;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandAffiliateInviteService;
+use App\Services\Professional\Brand\BrandAffiliateInviteService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;

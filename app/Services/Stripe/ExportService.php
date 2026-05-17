@@ -2,9 +2,9 @@
 
 namespace App\Services\Stripe;
 
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;

@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandPartnerLinkLifecycleService;
+use App\Services\Professional\Brand\BrandPartnerLinkLifecycleService;
 use App\Services\Professional\DTO\DisconnectRequest;
 use App\Services\Professional\Enums\CommissionHandling;
 use Illuminate\Http\JsonResponse;

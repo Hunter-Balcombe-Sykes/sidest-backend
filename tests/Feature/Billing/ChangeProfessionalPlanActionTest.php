@@ -1,9 +1,9 @@
 <?php
 
-use App\Actions\Subscription\ChangeProfessionalPlanAction;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 use App\Models\Core\Professional\Professional;
+use App\Services\Billing\ChangeProfessionalPlanAction;
 use App\Services\Stripe\StripeBillingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

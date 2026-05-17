@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\PublicSite;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\Core\Site\Site;
 use App\Services\Media\BrandDesignMediaService;
-use App\Services\Professional\BrandAffiliateInviteService;
+use App\Services\Professional\Brand\BrandAffiliateInviteService;
 use Illuminate\Http\JsonResponse;
 
 // V2: Public invite detail retrieval by token. Used by affiliate claim/decline pages during onboarding.

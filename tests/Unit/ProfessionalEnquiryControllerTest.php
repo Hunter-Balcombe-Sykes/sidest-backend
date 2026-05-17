@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalEnquiryController;
+use App\Http\Controllers\Api\Professional\Customers\ProfessionalEnquiryController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Enquiry;
 use Illuminate\Http\Request;

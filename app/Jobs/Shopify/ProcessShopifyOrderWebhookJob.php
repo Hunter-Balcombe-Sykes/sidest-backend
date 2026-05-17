@@ -3,12 +3,12 @@
 namespace App\Jobs\Shopify;
 
 use App\Jobs\Stripe\ProcessCommissionPayoutsJob;
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Customers\ContactCaptureService;
 use App\Services\Store\BrandCatalogService;

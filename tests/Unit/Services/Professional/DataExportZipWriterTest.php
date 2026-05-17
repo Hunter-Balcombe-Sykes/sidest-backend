@@ -2,7 +2,7 @@
 
 uses(Tests\TestCase::class)->in(__FILE__);
 
-use App\Services\Professional\DataExportZipWriter;
+use App\Services\Professional\DataExport\DataExportZipWriter;
 
 afterEach(function () {
     // Clean up any test temp files

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\StripeConnectWebhookController;
+use App\Http\Controllers\Api\Webhooks\Stripe\StripeConnectWebhookController;
 use App\Jobs\Stripe\SyncBrandPaymentMethodFromCheckoutSessionJob;
 use App\Services\Stripe\StripeConnectService;
 use Illuminate\Support\Facades\Bus;

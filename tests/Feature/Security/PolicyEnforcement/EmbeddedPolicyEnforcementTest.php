@@ -1,8 +1,8 @@
 <?php
 
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Models\Retail\BrandStoreSettings;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Gate;

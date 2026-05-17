@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Api\Webhooks\Stripe\StripeWebhookController;
 
 // STRP-L: customer PII scrubber. Stripe subscription + invoice events include
 // the customer's name, email, billing address, and saved card details inline

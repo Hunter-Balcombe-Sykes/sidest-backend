@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
+use App\Http\Controllers\Api\Professional\Brand\ShopifyIntegrationController;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Shopify\ShopifyTeardownService;
 use App\Services\Store\BrandAccessService;

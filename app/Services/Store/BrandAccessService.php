@@ -2,8 +2,8 @@
 
 namespace App\Services\Store;
 
+use App\Models\Brand\BrandTeamMembership;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandTeamMembership;
 
 // V2: Core. Role-based access control for brand operations. 5 roles (owner, finance, marketing, analyst, read_only) with capability-based permission checks.
 class BrandAccessService

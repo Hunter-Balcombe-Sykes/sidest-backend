@@ -14,7 +14,7 @@ use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
-use App\Services\Professional\BrandStatusService;
+use App\Services\Professional\Brand\BrandStatusService;
 use App\Services\Shopify\Client\ShopifyAdminClient;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;

@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceCategoryController;
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalServiceCategoryController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalServiceController;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
@@ -169,7 +169,7 @@ it('blocks a pending-deletion owner from creating a service with 423', function 
     ], 'POST');
 
     try {
-        app(\App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController::class)->store(
+        app(\App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalServiceController::class)->store(
             \App\Http\Requests\Api\Professional\Services\StoreServiceRequest::createFrom($req)
         );
         expect(false)->toBeTrue('Expected AuthorizationException');

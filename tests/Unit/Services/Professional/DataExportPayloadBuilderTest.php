@@ -2,7 +2,7 @@
 
 uses(Tests\TestCase::class)->in(__FILE__);
 
-use App\Services\Professional\DataExportPayloadBuilder;
+use App\Services\Professional\DataExport\DataExportPayloadBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Professional\DataExport\DataExportTestCase;

@@ -1,11 +1,11 @@
 <?php
 
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\ProfessionalIntegration;
-use App\Models\Retail\BrandStoreSettings;
+use App\Observers\Brand\BrandStoreSettingsObserver;
 use App\Observers\Commerce\AffiliateProductSelectionObserver;
 use App\Observers\Core\ProfessionalIntegrationObserver;
-use App\Observers\Retail\BrandStoreSettingsObserver;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use App\Services\Cache\SiteCacheService;

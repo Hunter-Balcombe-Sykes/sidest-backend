@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;

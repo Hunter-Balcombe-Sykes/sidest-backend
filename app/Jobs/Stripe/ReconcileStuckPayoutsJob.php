@@ -2,7 +2,7 @@
 
 namespace App\Jobs\Stripe;
 
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;

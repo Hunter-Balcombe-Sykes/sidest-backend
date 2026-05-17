@@ -3,7 +3,7 @@
 // Tests that the brand affiliate listing endpoint (GET /api/brand-affiliates)
 // exposes site_url from brand.brand_partner_links for each linked affiliate.
 
-use App\Http\Controllers\Api\Professional\BrandAffiliateController;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateController;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;

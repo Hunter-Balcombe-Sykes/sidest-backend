@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\ShopifyOrderWebhookController;
+use App\Http\Controllers\Api\Webhooks\Shopify\ShopifyOrderWebhookController;
 use App\Jobs\Shopify\ProcessShopifyOrderWebhookJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;

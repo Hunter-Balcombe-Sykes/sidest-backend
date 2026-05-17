@@ -3,7 +3,6 @@
 namespace App\Models\Commerce;
 
 use App\Models\BaseModel;
-use App\Models\Commerce\Order;
 use Database\Factories\Commerce\CommissionPayoutItemFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;

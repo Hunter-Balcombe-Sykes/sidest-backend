@@ -4,7 +4,7 @@
 // the social_platforms registry from config('partna.*') during normalize().
 uses(Tests\TestCase::class)->in(__FILE__);
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalLinkBlockController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalLinkBlockController;
 use App\Services\Site\SocialLinkNormalizer;
 
 function invokeBuildBlockFields(array $data): array

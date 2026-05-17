@@ -2,12 +2,12 @@
 
 namespace App\Services\Store;
 
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Commerce\AffiliateProductSelection;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
-use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Arr;

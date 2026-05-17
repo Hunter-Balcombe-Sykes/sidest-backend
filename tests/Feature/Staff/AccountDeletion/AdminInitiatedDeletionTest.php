@@ -199,7 +199,7 @@ it('obligations are overridden when explicitly requested and recorded in audit m
 });
 
 it('reason is required and validated at the form request level', function () {
-    $request = new \App\Http\Requests\Staff\StaffInitiateDeletionRequest;
+    $request = new \App\Http\Requests\Api\Staff\StaffInitiateDeletionRequest;
 
     // min:10 — too short
     $validator = validator(['reason' => 'short'], $request->rules(), $request->messages());

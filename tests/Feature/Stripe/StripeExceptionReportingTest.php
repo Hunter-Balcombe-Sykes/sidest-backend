@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Stripe\StripeConnectController;
-use App\Http\Requests\Stripe\SyncPaymentMethodSessionRequest;
+use App\Http\Requests\Api\Professional\Stripe\SyncPaymentMethodSessionRequest;
 use App\Services\Cache\CacheLockService;
 use App\Services\Stripe\CommissionPayoutService;
 use App\Services\Stripe\ExportService;

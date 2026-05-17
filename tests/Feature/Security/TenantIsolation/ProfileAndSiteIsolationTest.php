@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSiteController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalSiteController;
 use App\Services\Cache\SiteCacheService;
 use Illuminate\Support\Facades\DB;
 

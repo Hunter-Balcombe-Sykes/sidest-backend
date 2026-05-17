@@ -1,9 +1,9 @@
 <?php
 
-use App\Http\Controllers\Api\Webhooks\StripePlatformWebhookController;
+use App\Http\Controllers\Api\Webhooks\Stripe\StripePlatformWebhookController;
 use App\Models\Billing\WebhookEvent;
+use App\Models\Commerce\CommissionPayout;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
 use App\Services\Stripe\CommissionPayoutRefundService;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\Config;

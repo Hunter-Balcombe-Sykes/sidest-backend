@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Analytics\AffiliateProjectionsController;
-use App\Http\Requests\Professional\Analytics\AffiliateProjectionsRequest;
+use App\Http\Requests\Api\Professional\Analytics\AffiliateProjectionsRequest;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Cache\CacheKeyGenerator;

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\SubscriptionController;
+use App\Http\Controllers\Api\Professional\Subscription\SubscriptionController;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

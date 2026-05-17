@@ -4,8 +4,8 @@
 
 use App\Jobs\Stripe\VoidPendingCommissionsForLinkJob;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\BrandPartnerLinkAuditor;
-use App\Services\Professional\BrandPartnerLinkNotifier;
+use App\Services\Professional\Brand\BrandPartnerLinkAuditor;
+use App\Services\Professional\Brand\BrandPartnerLinkNotifier;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Support\Str;
 

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalServiceController;
 use App\Models\Core\Professional\Service;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;

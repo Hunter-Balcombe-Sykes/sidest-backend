@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffDataExportController;
-use App\Http\Requests\Staff\RequestStaffDataExportRequest;
+use App\Http\Requests\Api\Staff\RequestStaffDataExportRequest;
 use App\Models\Core\Gdpr\DataExportAudit;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Staff\PartnaStaff;

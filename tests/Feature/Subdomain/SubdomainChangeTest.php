@@ -2,9 +2,9 @@
 
 /** @phpstan-ignore-all */
 
-use App\Actions\Site\UpdateSiteAction;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Site\UpdateSiteAction;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

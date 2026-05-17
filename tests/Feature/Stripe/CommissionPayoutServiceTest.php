@@ -1,10 +1,10 @@
 <?php
 
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
+use App\Models\Commerce\CommissionPayout;
+use App\Models\Commerce\CommissionPayoutItem;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\CommissionPayout;
-use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Stripe\CommissionPayoutService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;

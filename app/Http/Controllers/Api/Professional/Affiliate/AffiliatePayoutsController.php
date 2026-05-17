@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Professional\Affiliate;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AffiliatePayoutResource;
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Gate;

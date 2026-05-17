@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api\Staff\ProfessionalSiteManagement;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandStoreSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 

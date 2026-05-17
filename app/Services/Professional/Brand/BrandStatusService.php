@@ -3,12 +3,12 @@
 namespace App\Services\Professional\Brand;
 
 use App\Enums\BrandStatus;
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
-use App\Models\Brand\BrandStoreSettings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;

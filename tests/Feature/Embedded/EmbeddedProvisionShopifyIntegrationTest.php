@@ -8,7 +8,7 @@ use App\Jobs\Shopify\RegisterShopifyWebhooksJob;
 use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\ProfessionalCacheService;
-use App\Services\Professional\BrandStatusService;
+use App\Services\Professional\Brand\BrandStatusService;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
+use App\Http\Controllers\Api\Professional\Brand\ShopifyIntegrationController;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 

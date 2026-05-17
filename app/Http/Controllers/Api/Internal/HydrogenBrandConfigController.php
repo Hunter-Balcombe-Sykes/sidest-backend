@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api\Internal;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;
-use App\Models\Retail\BrandStoreSettings;
 use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Http\JsonResponse;

@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ShopifyIntegration\ShopifyIntegrationController;
+use App\Http\Controllers\Api\Professional\Brand\ShopifyIntegrationController;
 use App\Services\Store\BrandAccessService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

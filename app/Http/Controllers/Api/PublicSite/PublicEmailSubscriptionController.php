@@ -8,7 +8,7 @@ use App\Http\Controllers\Concerns\ResolvesSubdomainFromHost;
 use App\Http\Requests\Api\PublicSite\PublicEmailSubscribeRequest;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
-use App\Services\Public\PublicSiteResolver;
+use App\Services\PublicSite\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;

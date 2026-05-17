@@ -2,7 +2,7 @@
 
 use App\Jobs\Gdpr\ExportProfessionalDataJob;
 use App\Models\Core\Professional\Professional;
-use App\Services\Professional\DataExportService;
+use App\Services\Professional\DataExport\DataExportService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;

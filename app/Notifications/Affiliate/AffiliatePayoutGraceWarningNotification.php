@@ -2,7 +2,7 @@
 
 namespace App\Notifications\Affiliate;
 
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;

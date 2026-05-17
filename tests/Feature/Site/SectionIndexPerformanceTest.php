@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalSectionBlockController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalSectionBlockController;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;

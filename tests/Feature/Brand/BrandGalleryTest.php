@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\BrandGalleryController;
+use App\Http\Controllers\Api\Professional\Brand\BrandGalleryController;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Models\Core\Site\SiteMedia;

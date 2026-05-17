@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\Professional\Analytics;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
-use App\Http\Requests\Professional\Analytics\AffiliateProjectionsRequest;
+use App\Http\Requests\Api\Professional\Analytics\AffiliateProjectionsRequest;
 use App\Http\Resources\Professional\Analytics\AffiliateProjectionsResource;
 use App\Models\Commerce\BrandAffiliateRollup;
 use App\Services\Analytics\AffiliateProjectionsService;

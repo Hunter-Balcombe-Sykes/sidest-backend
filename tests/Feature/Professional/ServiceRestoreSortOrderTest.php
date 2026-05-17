@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Api\Professional\ProfessionalSiteSelfManagement\ProfessionalServiceController;
+use App\Http\Controllers\Api\Professional\SiteManagement\ProfessionalServiceController;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {

@@ -2,7 +2,7 @@
 
 namespace App\Observers\Core;
 
-use App\Models\Retail\CommissionPayout;
+use App\Models\Commerce\CommissionPayout;
 use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;

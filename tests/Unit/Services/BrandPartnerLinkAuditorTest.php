@@ -1,6 +1,6 @@
 <?php
 
-use App\Services\Professional\BrandPartnerLinkAuditor;
+use App\Services\Professional\Brand\BrandPartnerLinkAuditor;
 use App\Services\Professional\Enums\DisconnectActor;
 use Illuminate\Support\Str;
 

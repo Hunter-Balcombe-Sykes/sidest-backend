@@ -36,7 +36,7 @@ const POLICY_EXEMPT = [
     \App\Models\Analytics\SiteVisit::class,
 
     // Nested under CommissionPayout — gated transitively by CommissionPolicy.
-    \App\Models\Retail\CommissionPayoutItem::class,
+    \App\Models\Commerce\CommissionPayoutItem::class,
 
     // Nested under Commerce\Order — append-only audit log; access flows through
     // the parent Order's CommissionPolicy. Mirrors the CommissionPayoutItem pattern.

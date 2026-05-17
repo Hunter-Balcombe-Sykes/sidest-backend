@@ -3,11 +3,11 @@
 namespace App\Services\Stripe;
 
 use App\Jobs\Stripe\ExecuteCommissionPayoutJob;
+use App\Models\Brand\BrandStoreSettings;
+use App\Models\Commerce\CommissionPayout;
+use App\Models\Commerce\CommissionPayoutItem;
 use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandStoreSettings;
-use App\Models\Retail\CommissionPayout;
-use App\Models\Retail\CommissionPayoutItem;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\DB;

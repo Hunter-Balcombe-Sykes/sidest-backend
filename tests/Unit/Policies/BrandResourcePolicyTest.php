@@ -1,7 +1,7 @@
 <?php
 
+use App\Models\Brand\BrandStoreSettings;
 use App\Models\Core\Professional\Professional;
-use App\Models\Retail\BrandStoreSettings;
 use App\Policies\BrandResourcePolicy;
 
 beforeEach(function () {

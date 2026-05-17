@@ -4,8 +4,8 @@ namespace App\Jobs\Gdpr;
 
 use App\Mail\Gdpr\ProfessionalDataExportMail;
 use App\Models\Core\Gdpr\DataExportAudit;
-use App\Services\Professional\DataExportPayloadBuilder;
-use App\Services\Professional\DataExportZipWriter;
+use App\Services\Professional\DataExport\DataExportPayloadBuilder;
+use App\Services\Professional\DataExport\DataExportZipWriter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
