@@ -18,8 +18,16 @@ beforeEach(function () {
     $this->mock(ShopifyTeardownService::class);
 });
 
-function seedInstallIntegration(string $professionalId, array $metadata = []): ProfessionalIntegration
-{
+/**
+ * @param  array<string, mixed>  $metadata  extra provider_metadata JSONB keys (per-step states, etc.)
+ * @param  ?string  $webhookState  webhook_registration_state column value (post-DATA-2 — the
+ *                                 canonical webhook-pipeline gate, no longer a JSONB key)
+ */
+function seedInstallIntegration(
+    string $professionalId,
+    array $metadata = [],
+    ?string $webhookState = null,
+): ProfessionalIntegration {
     // Use model save so the encrypted access_token cast is applied correctly.
     $integration = new ProfessionalIntegration([
         'professional_id' => $professionalId,
@@ -28,8 +36,8 @@ function seedInstallIntegration(string $professionalId, array $metadata = []): P
         'access_token' => 'shpat_test',
         'provider_metadata' => array_merge([
             'shop_domain' => 'test-shop.myshopify.com',
-            'webhook_registration_state' => 'queued',
         ], $metadata),
+        'webhook_registration_state' => $webhookState,
     ]);
     $integration->id = (string) Str::uuid();
     $integration->save();
@@ -54,12 +62,11 @@ it('returns pending when no step states are set', function () {
 it('returns complete when all five steps succeed', function () {
     $brand = createBrandTenant('setup-state-brand-2');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
         'sales_channel_state' => 'registered',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'synced',
-    ]);
+    ], webhookState: 'registered');
 
     $status = $integration->shopifyInstallStatus();
 
@@ -69,27 +76,25 @@ it('returns complete when all five steps succeed', function () {
 it('returns incomplete when any step is failed', function () {
     $brand = createBrandTenant('setup-state-brand-3');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'failed',
         'sales_channel_state' => 'registered',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'synced',
-    ]);
+    ], webhookState: 'registered');
 
     $status = $integration->shopifyInstallStatus();
 
     expect($status['state'])->toBe('incomplete');
 });
 
-it('returns incomplete when webhooks_state is partial', function () {
+it('returns incomplete when webhook_registration_state is partial', function () {
     $brand = createBrandTenant('setup-state-brand-4');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'partial',
         'metafield_definitions_state' => 'registered',
         'sales_channel_state' => 'registered',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'synced',
-    ]);
+    ], webhookState: 'partial');
 
     expect($integration->shopifyInstallStatus()['state'])->toBe('incomplete');
 });
@@ -97,10 +102,9 @@ it('returns incomplete when webhooks_state is partial', function () {
 it('returns pending when some steps are done but others missing', function () {
     $brand = createBrandTenant('setup-state-brand-5');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
         // sales_channel, storefront_token, brand_design still pending
-    ]);
+    ], webhookState: 'registered');
 
     expect($integration->shopifyInstallStatus()['state'])->toBe('pending');
 });
@@ -110,12 +114,11 @@ it('returns pending when some steps are done but others missing', function () {
 it('retrySetup returns queued=false when setup is already complete', function () {
     $brand = createBrandTenant('setup-state-brand-6');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
         'sales_channel_state' => 'registered',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'synced',
-    ]);
+    ], webhookState: 'registered');
 
     Queue::fake();
     $req = tenantRequestAs($brand, [], 'POST');
@@ -131,12 +134,11 @@ it('retrySetup returns queued=false when setup is already complete', function ()
 it('retrySetup re-dispatches failed steps and resets their state to queued', function () {
     $brand = createBrandTenant('setup-state-brand-7');
     $integration = seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'failed',
         'sales_channel_state' => 'registered',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'failed',
-    ]);
+    ], webhookState: 'registered');
 
     Queue::fake();
     $req = tenantRequestAs($brand, [], 'POST');
@@ -154,19 +156,18 @@ it('retrySetup re-dispatches failed steps and resets their state to queued', fun
     $metadata = $integration->provider_metadata;
     expect($metadata['metafield_definitions_state'])->toBe('queued');
     expect($metadata['brand_design_state'])->toBe('queued');
-    // Successful steps untouched
-    expect($metadata['webhooks_state'])->toBe('registered');
+    // Successful step untouched (column-backed post-DATA-2)
+    expect($integration->webhook_registration_state)->toBe('registered');
 });
 
 it('status endpoint includes setup_state and setup_steps when token is provisioned', function () {
     $brand = createBrandTenant('setup-state-brand-8');
     seedInstallIntegration($brand->id, [
-        'webhooks_state' => 'registered',
         'metafield_definitions_state' => 'registered',
         'sales_channel_state' => 'failed',
         'storefront_token_state' => 'registered',
         'brand_design_state' => 'synced',
-    ]);
+    ], webhookState: 'registered');
 
     $req = tenantRequestAs($brand, [], 'GET');
     $response = app(ShopifyIntegrationController::class)->status($req);

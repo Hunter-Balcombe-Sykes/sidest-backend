@@ -70,6 +70,8 @@ beforeEach(function () {
         last_catalog_sync_error TEXT,
         provider_metadata TEXT,
         shopify_shop_domain TEXT,
+        disconnected_at TEXT,
+        webhook_registration_state TEXT,
         created_at TEXT,
         updated_at TEXT
     )');
@@ -410,10 +412,12 @@ it('preserves sibling provider_metadata keys across a resync (concurrency regres
     [, , $integration] = createResyncBrand();
 
     // Sibling keys written by parallel onboarding jobs — must survive the resync.
+    // (webhook_registration_state is no longer a JSONB key post-DATA-2; metafield
+    // definitions state stays the canonical example of a per-step JSONB flag.)
     $integration->refresh();
     $meta = $integration->provider_metadata;
     $meta['storefront_access_token'] = 'tok_existing';
-    $meta['webhooks_state'] = 'registered';
+    $meta['metafield_definitions_state'] = 'registered';
     $meta['publication_id'] = '999';
     $integration->provider_metadata = $meta;
     $integration->save();
@@ -425,7 +429,7 @@ it('preserves sibling provider_metadata keys across a resync (concurrency regres
     $fresh = $integration->provider_metadata;
 
     expect($fresh['storefront_access_token'])->toBe('tok_existing');
-    expect($fresh['webhooks_state'])->toBe('registered');
+    expect($fresh['metafield_definitions_state'])->toBe('registered');
     expect($fresh['publication_id'])->toBe('999');
 
     expect($fresh['last_resynced_at'])->toBe($result['last_resynced_at']);

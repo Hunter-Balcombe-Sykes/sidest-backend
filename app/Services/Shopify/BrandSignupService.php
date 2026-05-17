@@ -45,16 +45,19 @@ class BrandSignupService
             $integration->update(['storefront_token' => null]);
         }
 
-        // Clear disconnected markers — the brand is reconnecting.
-        unset($metadata['disconnected_at'], $metadata['disconnected_reason']);
+        // Clear the JSONB reason tag — the brand is reconnecting. The
+        // disconnected_at column itself is reset to NULL on the update below
+        // (post-DATA-2 these are real columns, not JSONB keys).
+        unset($metadata['disconnected_reason']);
 
         $integration->update([
             'access_token' => $accessToken,
             'provider_metadata' => array_merge($metadata, [
                 'scopes' => $scopes,
                 'connected_at' => now()->toIso8601String(),
-                'webhook_registration_state' => 'queued',
             ]),
+            'disconnected_at' => null,
+            'webhook_registration_state' => 'queued',
         ]);
 
         $this->dispatchInstallJobs((string) $integration->id);

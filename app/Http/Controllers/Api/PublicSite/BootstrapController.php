@@ -220,8 +220,10 @@ class BootstrapController extends ApiController
                             'scopes' => $shopifyData['scopes'],
                             'webhook_orders_topic' => config('services.shopify.webhook_orders_topic', 'orders/paid'),
                             'connected_at' => now()->toIso8601String(),
-                            'webhook_registration_state' => 'queued',
                         ],
+                        // Post-DATA-2: column-backed gate (RegisterShopifyWebhooksJob
+                        // flips this to 'registered'/'partial'/'failed' on first run).
+                        'webhook_registration_state' => 'queued',
                     ]);
 
                     $shopifyIntegrationId = (string) $integration->id;

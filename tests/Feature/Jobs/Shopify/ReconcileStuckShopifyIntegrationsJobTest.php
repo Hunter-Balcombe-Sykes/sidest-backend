@@ -77,7 +77,9 @@ it('heals an integration whose access token Shopify revoked (401)', function () 
     $meta = json_decode($integration->provider_metadata, true);
     expect($meta['disconnected_reason'])->toBe('reconcile_detected_revocation');
     expect($meta['reconcile_detection_signal'])->toBe('invalid_token');
-    expect($meta['disconnected_at'])->not->toBeNull();
+    // Post-DATA-2: state lives on dedicated columns; JSONB keeps only the labels.
+    expect($integration->disconnected_at)->not->toBeNull();
+    expect($integration->webhook_registration_state)->toBe('uninstalled');
 
     $brand = DB::table('brand.brand_profiles')->where('professional_id', $proId)->first();
     expect($brand->brand_status)->toBe(BrandStatus::Disconnected->value);
@@ -102,7 +104,7 @@ it('heals an integration where the Admin API returns a different myshopify_domai
 
     $meta = json_decode($integration->provider_metadata, true);
     expect($meta['reconcile_detection_signal'])->toBe('shop_domain_mismatch');
-    expect($meta['disconnected_at'])->not->toBeNull();
+    expect($integration->disconnected_at)->not->toBeNull();
 });
 
 it('leaves a healthy integration untouched', function () {
@@ -123,7 +125,7 @@ it('leaves a healthy integration untouched', function () {
     // back to the plaintext token we seeded.
     $integration = ProfessionalIntegration::query()->where('professional_id', $proId)->first();
     expect($integration->access_token)->toBe('shpat_healthy');
-    expect($integration->provider_metadata['disconnected_at'] ?? null)->toBeNull();
+    expect($integration->disconnected_at)->toBeNull();
 
     $brand = DB::table('brand.brand_profiles')->where('professional_id', $proId)->first();
     expect($brand->brand_status)->toBe(BrandStatus::ShopifyConfigured->value);
@@ -142,7 +144,7 @@ it('leaves a transient-outage integration untouched (5xx)', function () {
 
     $integration = ProfessionalIntegration::query()->where('professional_id', $proId)->first();
     expect($integration->access_token)->not->toBeNull();
-    expect($integration->provider_metadata['disconnected_at'] ?? null)->toBeNull();
+    expect($integration->disconnected_at)->toBeNull();
 });
 
 it('heals on 4xx non-401 (shop suspended / deleted)', function (int $status) {
@@ -166,7 +168,7 @@ it('heals on 4xx non-401 (shop suspended / deleted)', function (int $status) {
 
     $meta = json_decode($integration->provider_metadata, true);
     expect($meta['reconcile_detection_signal'])->toBe('unexpected_status_'.$status);
-    expect($meta['disconnected_at'])->not->toBeNull();
+    expect($integration->disconnected_at)->not->toBeNull();
 
     $brand = DB::table('brand.brand_profiles')->where('professional_id', $proId)->first();
     expect($brand->brand_status)->toBe(BrandStatus::Disconnected->value);
@@ -185,8 +187,8 @@ it('skips integrations already marked disconnected (no Admin API call)', functio
         'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
         'shopify_shop_domain' => 'brand-a.myshopify.com',
         'access_token' => 'shpat_already_handled',  // Stale token left around — sanity check it isn't re-cleared.
+        'disconnected_at' => '2026-05-10T00:00:00+00:00',
         'provider_metadata' => json_encode([
-            'disconnected_at' => '2026-05-10T00:00:00+00:00',
             'disconnected_reason' => 'app_uninstalled',
         ]),
         'created_at' => now(),

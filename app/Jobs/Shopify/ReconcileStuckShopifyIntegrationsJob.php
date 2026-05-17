@@ -53,20 +53,16 @@ class ReconcileStuckShopifyIntegrationsJob implements ShouldQueue
 
     public function handle(): void
     {
-        // Filter in PHP rather than via provider_metadata->>'disconnected_at' so the
-        // test SQLite-on-pgsql harness and the real Postgres path both work. At our
-        // scale (low hundreds of connected brands), the cost is negligible.
+        // Post-DATA-2: disconnected_at is a real column, so the filter pushes
+        // down to the planner and the partial index on disconnected_at lets
+        // the candidate set skip already-disconnected rows entirely.
         $candidates = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->whereNotNull('access_token')
+            ->whereNull('disconnected_at')
             ->orderBy('updated_at')
             ->limit(self::BATCH_LIMIT)
-            ->get()
-            ->filter(function (ProfessionalIntegration $integration): bool {
-                $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-
-                return empty($metadata['disconnected_at']);
-            });
+            ->get();
 
         if ($candidates->isEmpty()) {
             Log::info('shopify.reconcile.nothing_to_reconcile');
@@ -178,17 +174,19 @@ class ReconcileStuckShopifyIntegrationsJob implements ShouldQueue
 
     private function markDisconnected(ProfessionalIntegration $integration, string $detectionSignal): void
     {
+        // Label/audit-trail JSONB: reason tag + detection signal. The state
+        // itself — disconnected_at + webhook_registration_state='uninstalled'
+        // — lives on dedicated columns (DATA-2).
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        $metadata['disconnected_at'] = now()->toIso8601String();
         $metadata['disconnected_reason'] = 'reconcile_detected_revocation';
         $metadata['reconcile_detection_signal'] = $detectionSignal;
-        $metadata['webhook_registration_state'] = 'uninstalled';
-        $metadata['webhooks_state'] = 'uninstalled';
 
         $integration->update([
             'access_token' => null,
             'refresh_token' => null,
             'provider_metadata' => $metadata,
+            'disconnected_at' => now(),
+            'webhook_registration_state' => 'uninstalled',
         ]);
 
         // Mirrors the webhook controller's disconnect path. Wizard progress is

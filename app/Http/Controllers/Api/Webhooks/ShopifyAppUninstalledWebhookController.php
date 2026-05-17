@@ -58,12 +58,12 @@ class ShopifyAppUninstalledWebhookController extends ApiController
         try {
             $result = DB::transaction(function () use ($shopDomain) {
                 // 4. Lock the integration row inside the transaction so the read of
-                //    disconnected_at and the subsequent token-null write are atomic
-                //    against EmbeddedSetupController::provisionShopifyIntegration
+                //    disconnected_at (column, post-DATA-2) and the subsequent token-null
+                //    write are atomic against EmbeddedSetupController::provisionShopifyIntegration
                 //    (which uses the same lockForUpdate pattern on reinstall). Without
                 //    this, a late-arriving uninstall webhook with a distinct webhook
                 //    ID can race a reinstall: layer-1 cache dedup misses (new ID),
-                //    the disconnected_at guard reads pre-reinstall metadata, then
+                //    the disconnected_at guard reads a pre-reinstall snapshot, then
                 //    overwrites the freshly-issued access token.
                 $integration = ProfessionalIntegration::query()
                     ->where('shopify_shop_domain', $shopDomain)
@@ -79,20 +79,18 @@ class ShopifyAppUninstalledWebhookController extends ApiController
 
                 // 5. Secondary idempotency guard, now inside the lock. Durable across
                 //    cache TTL expiry; if the second delivery lands after the cache
-                //    forgets the webhook ID, disconnected_at still wins.
-                if (! empty($metadata['disconnected_at'])) {
+                //    forgets the webhook ID, the disconnected_at column still wins.
+                if ($integration->disconnected_at !== null) {
                     return ['action' => 'duplicate'];
                 }
 
-                $metadata['disconnected_at'] = now()->toIso8601String();
+                // Labels/audit-trail JSONB: the reason tag and pre-uninstall
+                // wizard snapshot. The state itself — disconnected_at + the
+                // 'uninstalled' webhook_registration_state — lives on dedicated
+                // columns (DATA-2). Preserve pre-uninstall state so the brand
+                // can resume where they left off on reinstall.
                 $metadata['disconnected_reason'] = 'app_uninstalled';
-                $metadata['webhook_registration_state'] = 'uninstalled';
-                $metadata['webhooks_state'] = 'uninstalled';
 
-                // Preserve pre-uninstall state so the brand can resume where they left
-                // off on reinstall. Wizard flags in brand_store_settings are NOT
-                // cleared — Shopify-side resources may persist, and BrandSignupService
-                // re-evaluates them on reinstall.
                 $brandProfile = BrandProfile::where('professional_id', $integration->professional_id)->first();
                 $storeSettings = BrandStoreSettings::where('professional_id', $integration->professional_id)->first();
 
@@ -107,6 +105,8 @@ class ShopifyAppUninstalledWebhookController extends ApiController
                     'access_token' => null,
                     'refresh_token' => null,
                     'provider_metadata' => $metadata,
+                    'disconnected_at' => now(),
+                    'webhook_registration_state' => 'uninstalled',
                 ]);
 
                 // Set brand to disconnected without clearing wizard progress —

@@ -145,7 +145,7 @@ class ShopifyIntegrationController extends ApiController
             'shop_domain' => $connected ? $shopDomain : null,
             'shop_id' => $connected ? (string) Arr::get($metadata, 'shop_id') : null,
             'expires_at' => $integration?->expires_at?->toIso8601String(),
-            'webhook_registration_state' => $tokenProvisioned ? Arr::get($metadata, 'webhook_registration_state') : null,
+            'webhook_registration_state' => $tokenProvisioned ? $integration->webhook_registration_state : null,
             'webhook_registration_last_attempt_at' => $tokenProvisioned
                 ? Arr::get($metadata, 'webhook_registration_last_attempt_at')
                 : null,
@@ -221,7 +221,6 @@ class ShopifyIntegrationController extends ApiController
                 config('services.shopify.webhook_orders_topic', 'orders/paid')
             ))),
             'connected_at' => now()->toIso8601String(),
-            'webhook_registration_state' => 'queued',
         ]);
 
         $integration = ProfessionalIntegration::query()->updateOrCreate(
@@ -238,6 +237,11 @@ class ShopifyIntegrationController extends ApiController
                 'expires_at' => $validated['expires_at'] ?? null,
                 'last_catalog_sync_error' => null,
                 'provider_metadata' => $metadata,
+                // Post-DATA-2: column-backed state. Reset to queued on every
+                // connect — the install pipeline below will flip it to
+                // 'registered'/'partial'/'failed' as it runs.
+                'disconnected_at' => null,
+                'webhook_registration_state' => 'queued',
             ]
         );
 
@@ -507,9 +511,11 @@ class ShopifyIntegrationController extends ApiController
             ]);
         }
 
-        // Map step name → job class and metadata state key
+        // Map step name → job class and where the step's state lives.
+        // 'webhooks' lives on the webhook_registration_state column (DATA-2);
+        // the other four steps still live in provider_metadata JSONB.
         $stepMap = [
-            'webhooks' => ['job' => RegisterShopifyWebhooksJob::class,     'state_key' => 'webhooks_state'],
+            'webhooks' => ['job' => RegisterShopifyWebhooksJob::class,     'state_key' => null],
             'metafields' => ['job' => CreateShopifyMetafieldsJob::class,     'state_key' => 'metafield_definitions_state'],
             'sales_channel' => ['job' => CreateShopifySalesChannelJob::class,   'state_key' => 'sales_channel_state'],
             'storefront_token' => ['job' => CreateStorefrontAccessTokenJob::class, 'state_key' => 'storefront_token_state'],
@@ -524,11 +530,19 @@ class ShopifyIntegrationController extends ApiController
 
         // Reset failed steps to 'queued' so the frontend sees 'pending' while jobs run.
         $resetMetadata = [];
+        $resetColumns = [];
         foreach (array_keys($toRetry) as $step) {
-            $resetMetadata[$stepMap[$step]['state_key']] = 'queued';
+            if ($step === 'webhooks') {
+                $resetColumns['webhook_registration_state'] = 'queued';
+            } else {
+                $resetMetadata[$stepMap[$step]['state_key']] = 'queued';
+            }
         }
         if ($resetMetadata !== []) {
             $integration->mergeProviderMetadata($resetMetadata);
+        }
+        if ($resetColumns !== []) {
+            $integration->update($resetColumns);
         }
 
         $actorProfessional = $this->currentProfessional($request);

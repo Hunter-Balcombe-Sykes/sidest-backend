@@ -97,9 +97,15 @@ it('app/uninstalled — valid HMAC clears access_token, transitions brand to dis
 
     $meta = json_decode($row->provider_metadata, true);
     expect($meta['disconnected_reason'])->toBe('app_uninstalled');
-    expect($meta['webhooks_state'])->toBe('uninstalled');
     expect($meta['some_existing'])->toBe('value');  // Pre-existing keys preserved.
-    expect($meta['disconnected_at'])->not->toBeNull();
+
+    // Post-DATA-2: state lives on dedicated columns, not in JSONB.
+    expect($row->disconnected_at)->not->toBeNull();
+    expect($row->webhook_registration_state)->toBe('uninstalled');
+    // The JSONB drawer should no longer carry the duplicated state keys.
+    expect($meta)->not->toHaveKey('disconnected_at');
+    expect($meta)->not->toHaveKey('webhook_registration_state');
+    expect($meta)->not->toHaveKey('webhooks_state');
 
     // TEST-6: the authoritative state-machine write must actually happen — the
     // BrandProfile::update path was previously untested because no brand_profiles
@@ -165,8 +171,9 @@ it('app/uninstalled — second delivery after cache TTL expiry is still a no-op 
         'provider' => ProfessionalIntegration::PROVIDER_SHOPIFY,
         'shopify_shop_domain' => 'brand-a.myshopify.com',
         'access_token' => null,  // First delivery already cleared token.
+        // Post-DATA-2: disconnected_at is a column; reason label still in JSONB.
+        'disconnected_at' => '2026-05-14T00:00:00+00:00',
         'provider_metadata' => json_encode([
-            'disconnected_at' => '2026-05-14T00:00:00+00:00',
             'disconnected_reason' => 'app_uninstalled',
         ]),
         'created_at' => now(),
@@ -186,8 +193,7 @@ it('app/uninstalled — second delivery after cache TTL expiry is still a no-op 
 
     // disconnected_at unchanged — the no-op path returns without overwriting state.
     $row = DB::table('core.professional_integrations')->where('professional_id', $proId)->first();
-    $meta = json_decode($row->provider_metadata, true);
-    expect($meta['disconnected_at'])->toBe('2026-05-14T00:00:00+00:00');
+    expect($row->disconnected_at)->toBe('2026-05-14T00:00:00+00:00');
 
     Bus::assertNotDispatched(PurgeAffiliateProductSelectionsJob::class);
 });

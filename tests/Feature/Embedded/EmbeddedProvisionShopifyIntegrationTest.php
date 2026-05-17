@@ -79,11 +79,20 @@ function makeProvisionToken(string $shopDomain = PROVISION_SHOP): string
  * sets the generated-in-prod `shopify_shop_domain` column so the resolver
  * step of the shopify.session middleware finds the brand.
  *
+ * Post-DATA-2: keys promoted to columns (disconnected_at, webhook_registration_state)
+ * are pulled out of $metadataOverrides automatically and written to their respective
+ * columns — keeps test bodies short and matches the on-disk shape exactly.
+ *
  * @param  array<string, mixed>  $metadataOverrides  merged into provider_metadata
  */
 function seedProvisionIntegration(string $handle, ?string $accessToken, array $metadataOverrides = []): ProfessionalIntegration
 {
     $brand = createBrandTenant($handle);
+
+    // Promote column-backed fields out of the metadata bag (DATA-2).
+    $disconnectedAt = $metadataOverrides['disconnected_at'] ?? null;
+    $webhookState = $metadataOverrides['webhook_registration_state'] ?? null;
+    unset($metadataOverrides['disconnected_at'], $metadataOverrides['webhook_registration_state']);
 
     $integration = new ProfessionalIntegration([
         'professional_id' => $brand->id,
@@ -91,6 +100,8 @@ function seedProvisionIntegration(string $handle, ?string $accessToken, array $m
         'external_account_id' => PROVISION_SHOP,
         'access_token' => $accessToken,
         'provider_metadata' => array_merge(['shop_domain' => PROVISION_SHOP], $metadataOverrides),
+        'disconnected_at' => $disconnectedAt,
+        'webhook_registration_state' => $webhookState,
     ]);
     $integration->id = (string) Str::uuid();
     $integration->save();
@@ -103,8 +114,10 @@ function seedProvisionIntegration(string $handle, ?string $accessToken, array $m
 }
 
 /**
- * provider_metadata for an integration that has completed the full setup —
- * webhook registration succeeded, all four collection handles present.
+ * provider_metadata + columns for an integration that has completed the full
+ * setup — webhook registration succeeded, all four collection handles present.
+ * The seedProvisionIntegration helper routes webhook_registration_state to its
+ * column automatically.
  *
  * @return array<string, mixed>
  */
@@ -151,8 +164,12 @@ it('dispatches all six setup jobs on first provision and clears disconnected_at'
 
     $integration->refresh();
     $metadata = $integration->provider_metadata;
-    expect($metadata)->not->toHaveKey('disconnected_at');
+    // disconnected_at is a column post-DATA-2 — the reinstall path must reset it
+    // and clear the reason label so BrandStatusService doesn't trap the brand in
+    // Disconnected. The metadata bag never sees disconnected_at anymore.
+    expect($integration->disconnected_at)->toBeNull();
     expect($metadata)->not->toHaveKey('disconnected_reason');
+    expect($metadata)->not->toHaveKey('disconnected_at');
 });
 
 it('skips job dispatch on a no-op token refresh when integration is complete', function () {

@@ -89,8 +89,9 @@ class ShopifyTokenDiagnoseCommand extends Command
 
         $this->newLine();
         $this->info('--- Re-dispatching failed setup steps ---');
-        $stepMap = [
-            'webhooks_state' => RegisterShopifyWebhooksJob::class,
+        // Post-DATA-2: webhook state is the webhook_registration_state column;
+        // the other four steps still live in provider_metadata.
+        $jsonbStepMap = [
             'metafield_definitions_state' => CreateShopifyMetafieldsJob::class,
             'collections_state' => CreateShopifyCollectionsJob::class,
             'sales_channel_state' => CreateShopifySalesChannelJob::class,
@@ -98,7 +99,17 @@ class ShopifyTokenDiagnoseCommand extends Command
         ];
 
         $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-        foreach ($stepMap as $stateKey => $jobClass) {
+
+        $webhookState = $integration->webhook_registration_state;
+        if (in_array($webhookState, ['registered', 'synced'], true)) {
+            $this->line("skip webhook_registration_state ({$webhookState})");
+        } else {
+            $integration->update(['webhook_registration_state' => 'queued']);
+            RegisterShopifyWebhooksJob::dispatch((string) $integration->id);
+            $this->line('dispatched '.RegisterShopifyWebhooksJob::class." (was {$webhookState})");
+        }
+
+        foreach ($jsonbStepMap as $stateKey => $jobClass) {
             $current = $metadata[$stateKey] ?? null;
             if (in_array($current, ['registered', 'synced'], true)) {
                 $this->line("skip {$stateKey} ({$current})");

@@ -688,7 +688,7 @@ class EmbeddedSetupController extends ApiController
         //      leave default + favourites created but active + high-commission
         //      missing. Checking each handle individually catches that partial
         //      state — the old `empty(active) && empty(default)` check missed it.
-        $existingWebhookState = Arr::get($existingMetadata, 'webhook_registration_state', '');
+        $existingWebhookState = (string) ($existing?->webhook_registration_state ?? '');
         $collectionsIncomplete = empty(Arr::get($existingMetadata, 'active_collection_handle'))
             || empty(Arr::get($existingMetadata, 'default_collection_handle'))
             || empty(Arr::get($existingMetadata, 'favourites_collection_handle'))
@@ -772,19 +772,14 @@ class EmbeddedSetupController extends ApiController
                 'shop_id' => $data['shop_id'] ?? Arr::get($lockedMetadata, 'shop_id'),
                 'scopes' => $scopesArray ?: Arr::get($lockedMetadata, 'scopes', []),
                 'connected_at' => now()->toIso8601String(),
-                'webhook_registration_state' => 'queued',
                 'connected_via' => 'embedded_wizard',
             ]);
 
-            // Clear disconnected_* — stamped by ShopifyAppUninstalledWebhookController
-            // on uninstall, never auto-cleared on reinstall. Without removal here,
-            // BrandStatusService::determine() keeps returning Disconnected (its
-            // first check), which traps the embedded app's wizard in a redirect
-            // loop (app.tsx loader: brand_status === 'disconnected' → needsReconnect
-            // → /shopify-setup, repeat). Both keys must be cleared — the uninstall
-            // webhook writes both `disconnected_at` (timestamp) and `disconnected_reason`
-            // ('app_uninstalled'); clearing only one used to leave the brand stuck.
-            unset($metadata['disconnected_at']);
+            // disconnected_reason was stamped by the uninstall webhook alongside
+            // the disconnected_at column. Clear the label here too — the
+            // disconnected_at column itself is reset to NULL on the integration
+            // update below. Without clearing the label, downstream consumers
+            // (dashboard, audits) would show a stale reason on a reconnected brand.
             unset($metadata['disconnected_reason']);
 
             return ProfessionalIntegration::updateOrCreate(
@@ -797,6 +792,11 @@ class EmbeddedSetupController extends ApiController
                     'access_token' => $data['access_token'],
                     'last_catalog_sync_error' => null,
                     'provider_metadata' => $metadata,
+                    // Column-backed control-flow fields (DATA-2): set with the
+                    // same write so a concurrent BrandStatusService::determine()
+                    // running mid-transaction doesn't see a stale Disconnected.
+                    'disconnected_at' => null,
+                    'webhook_registration_state' => 'queued',
                 ],
             );
         });

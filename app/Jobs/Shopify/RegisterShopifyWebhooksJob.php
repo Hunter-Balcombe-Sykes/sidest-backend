@@ -111,9 +111,9 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 
         if ($shopDomain === '' || $accessToken === '' || ! preg_match('/^[a-z0-9\-]+\.myshopify\.com$/', $shopDomain)) {
             $integration->mergeProviderMetadata([
-                'webhooks_state' => 'failed',
                 'webhooks_error' => 'Missing or invalid shop domain or access token.',
             ]);
+            $integration->update(['webhook_registration_state' => 'failed']);
 
             return;
         }
@@ -152,13 +152,17 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
+        // Post-DATA-2: webhook_registration_state is a column, not a JSONB key.
+        // The audit-trail bookkeeping (registered_at, per-topic results,
+        // last_attempt_at) stays in JSONB — variable-shape and read only for
+        // diagnostics, not for control flow.
         $integration->mergeProviderMetadata([
-            'webhooks_state' => $allSucceeded ? 'registered' : 'partial',
             'webhooks_registered_at' => now()->toIso8601String(),
             'webhooks_results' => $results,
-            // Backward-compat keys
-            'webhook_registration_state' => $allSucceeded ? 'registered' : 'partial',
             'webhook_registration_last_attempt_at' => now()->toIso8601String(),
+        ]);
+        $integration->update([
+            'webhook_registration_state' => $allSucceeded ? 'registered' : 'partial',
         ]);
 
         Log::info('Shopify webhook registration complete.', [

@@ -193,12 +193,10 @@ class BrandStatusService
             ];
         }
 
-        $metadata = is_array($integration->provider_metadata) ? $integration->provider_metadata : [];
-
         return [
             'has_integration' => true,
             'has_token' => ! empty($integration->access_token),
-            'has_disconnected_at' => ! empty($metadata['disconnected_at'] ?? null),
+            'has_disconnected_at' => $integration->disconnected_at !== null,
         ];
     }
 
