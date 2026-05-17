@@ -13,7 +13,7 @@
 ## Progress
 
 - P0: 2 of 5 complete (#SHOP-1, #GDPR-1)
-- P1: 5 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2, #ANALYTICS-1, #CATALOG-1)
+- P1: 6 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2, #ANALYTICS-1, #CATALOG-1, #CATALOG-2)
 - P2: 5 of 13 complete (#BRAND-SETUP-1, #COLLECTION-1, #GBP-1, #BOOK-1, #STRIPE-PM-1)
 - P3: 0 of 6 complete (defer-by-default per agent memory; build only when a real ticket lands)
 
@@ -35,7 +35,7 @@ unticked write half: #ENQUIRY-1 (admin DELETE), #BRAND-DESIGN-1 (resync POST),
 | Square / Fresha integrations | full lifecycle | **none** | major |
 | Shopify integration | full lifecycle | resync only | major |
 | Stripe Connect / payment methods / top-ups / payouts | full | **none** (only commission-payout retry) | major |
-| Brand catalog (products, metafields, commission, discount, active) | full | **none** | major |
+| Brand catalog (products, metafields, commission, discount, active) | full | read-only inspector + admin override on commission/discount/active | minor |
 | Brand collections | full | **none** | major |
 | Brand design / Shopify design resync | full | **none** | gap |
 | Brand onboarding readiness / setup wizard | full | **none** | gap |
@@ -65,7 +65,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 - [x] **B3 — Staff subscription extensions.** #SUB-1, #SUB-2. ~1–2h. Both extend `StaffSubscriptionManagementController` with parallel methods that already exist on `SubscriptionController`. One file, two methods, one Pest test that asserts each returns the same shape as self-service.
 
-- [ ] **B4 — Catalog admin overrides.** #CATALOG-2 (3 endpoints: commission, discount, active). ~2–3h. Same pattern across three product-field PATCH endpoints. Pre-req: #CATALOG-1 (the read-only inspector) so the admin can see what they're editing. One Pest sweep that toggles each field and asserts it round-trips through the brand's own dashboard.
+- [x] **B4 — Catalog admin overrides.** #CATALOG-2 (3 endpoints: commission, discount, active). ~2–3h. Same pattern across three product-field PATCH endpoints. Pre-req: #CATALOG-1 (the read-only inspector) so the admin can see what they're editing. One Pest sweep that toggles each field and asserts it round-trips through the brand's own dashboard. Shipped 2026-05-17.
 
 - [ ] **B5 — Notification + invite admin extensions.** #NOTIF-1, #INVITE-1. ~3–5h. Both extend an existing staff controller (`StaffNotificationController` / `StaffInviteController`) with the missing write methods that already exist on the self-service side. Shared mental model: "what can a brand do that staff can't yet?" One PR, two reviewer-friendly diffs.
 
@@ -299,7 +299,7 @@ These are best in their own session because bundling would force unrelated archi
         // deliberately skips Shopify metafield sync to avoid API calls during support operations.
         ```
 
-- [ ] **#CATALOG-2** · P1 — Brand catalog admin overrides (commission, discount, active)
+- [x] **#CATALOG-2** · P1 — Brand catalog admin overrides (commission, discount, active)
     - **Where:** extend the read-only catalog inspector (#CATALOG-1) with admin writes; mirror `app/Http/Controllers/Api/Professional/Store/BrandCatalogController.php` methods `updateCommission`, `updateDiscount`, `toggleActive`.
     - **Affects:** Mis-priced products, broken checkouts during a brand's off-hours.
     - **Effort:** M (~2–3h)

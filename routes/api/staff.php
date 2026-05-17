@@ -338,6 +338,21 @@ Route::prefix('staff')
         // Override brand commission rate and payout hold days (admin only)
         Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
 
+        // #CATALOG-2 — admin catalog overrides. Reuses the same brand-catalog-writes
+        // throttle pool as the self-service controller so staff cannot burn the
+        // brand's Shopify rate-limit budget. Writes go straight to Shopify via the
+        // shared BrandCatalogService and immediately propagate to the brand-side
+        // catalog inspector.
+        Route::patch('/professionals/{professional}/brand/catalog/{productGid}/commission', [StaffBrandCatalogController::class, 'updateCommission'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+        Route::patch('/professionals/{professional}/brand/catalog/{productGid}/discount', [StaffBrandCatalogController::class, 'updateDiscount'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+        Route::patch('/professionals/{professional}/brand/catalog/{productGid}/active', [StaffBrandCatalogController::class, 'toggleActive'])
+            ->middleware('throttle:brand-catalog-writes')
+            ->where('productGid', '.*');
+
         // GDPR-triggered erasure: support invokes the same lifecycle as self-service
         // but skips the email-token step. Reason field is mandatory.
         // withTrashed: an already-soft-deleted account can still be the subject
