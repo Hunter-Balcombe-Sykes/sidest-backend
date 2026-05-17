@@ -28,7 +28,7 @@ beforeEach(function () {
 /**
  * @return mixed
  */
-function invokePrivate(object $instance, string $method, mixed ...$args)
+function invokeStorefrontPrivate(object $instance, string $method, mixed ...$args)
 {
     $ref = (new ReflectionClass($instance))->getMethod($method);
     $ref->setAccessible(true);
@@ -44,7 +44,7 @@ it('EmbeddedSetupController allows subdomains under the configured public domain
     ]);
 
     $controller = app(EmbeddedSetupController::class);
-    $result = invokePrivate($controller, 'checkStorefrontStatus', 'shop');
+    $result = invokeStorefrontPrivate($controller, 'checkStorefrontStatus', 'shop');
 
     expect($result)->toBe('live');
     Http::assertSent(fn ($r) => $r->url() === 'https://shop.partna.test');
@@ -54,7 +54,7 @@ it('EmbeddedSetupController refuses a subdomain that escapes via fragment to ano
     Http::fake(); // any outbound call would 200 by default; we'll assert none were sent.
 
     $controller = app(EmbeddedSetupController::class);
-    $result = invokePrivate($controller, 'checkStorefrontStatus', $maliciousSubdomain);
+    $result = invokeStorefrontPrivate($controller, 'checkStorefrontStatus', $maliciousSubdomain);
 
     expect($result)->toBe('unreachable');
     Http::assertNothingSent();
@@ -74,7 +74,7 @@ it('BrandStoreSettingsController allows subdomains under the configured public d
     ]);
 
     $controller = app(BrandStoreSettingsController::class);
-    $result = invokePrivate($controller, 'checkStorefrontStatus', 'shop');
+    $result = invokeStorefrontPrivate($controller, 'checkStorefrontStatus', 'shop');
 
     expect($result)->toBe('live');
     Http::assertSent(fn ($r) => $r->url() === 'https://shop.partna.test');
@@ -84,7 +84,7 @@ it('BrandStoreSettingsController refuses a subdomain that escapes via fragment t
     Http::fake();
 
     $controller = app(BrandStoreSettingsController::class);
-    $result = invokePrivate($controller, 'checkStorefrontStatus', $maliciousSubdomain);
+    $result = invokeStorefrontPrivate($controller, 'checkStorefrontStatus', $maliciousSubdomain);
 
     expect($result)->toBe('unreachable');
     Http::assertNothingSent();
@@ -103,7 +103,7 @@ it('BrandStatusService refuses a subdomain that escapes via fragment to another 
 
     $service = app(BrandStatusService::class);
     $settings = new BrandStoreSettings; // any non-null instance — the body only null-checks.
-    $result = invokePrivate($service, 'isStorefrontReachable', $settings, $maliciousSubdomain);
+    $result = invokeStorefrontPrivate($service, 'isStorefrontReachable', $settings, $maliciousSubdomain);
 
     expect($result)->toBeFalse();
     Http::assertNothingSent();
@@ -122,7 +122,7 @@ it('BrandStatusService allows subdomains under the configured public domain', fu
 
     $service = app(BrandStatusService::class);
     $settings = new BrandStoreSettings;
-    $result = invokePrivate($service, 'isStorefrontReachable', $settings, 'shop');
+    $result = invokeStorefrontPrivate($service, 'isStorefrontReachable', $settings, 'shop');
 
     expect($result)->toBeTrue();
     Http::assertSent(fn ($r) => $r->url() === 'https://shop.partna.test');

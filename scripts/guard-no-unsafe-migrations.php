@@ -15,7 +15,6 @@
  *
  * See supabase/migrations/CONVENTIONS.md for the safe alternatives.
  */
-
 const GRANDFATHERED_CUTOFF = '20260514100000';
 const MIGRATIONS_DIR = 'supabase/migrations';
 
@@ -46,10 +45,36 @@ foreach (glob(MIGRATIONS_DIR.'/*.sql') as $file) {
 
     // ── Check 1: CREATE INDEX without CONCURRENTLY ────────────────────────────
     // Matches CREATE INDEX and CREATE UNIQUE INDEX but not CREATE INDEX CONCURRENTLY.
-    if (preg_match('/\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)/i', $content)) {
-        $errors[] = "$basename: CREATE INDEX without CONCURRENTLY detected.\n"
-            ."  Use: CREATE INDEX CONCURRENTLY IF NOT EXISTS ... (outside any transaction block)\n"
-            ."  See: supabase/migrations/CONVENTIONS.md §1";
+    // Indexes on tables created in the same migration are exempt: the table is
+    // empty at index time, so there's no lock contention. (And CONCURRENTLY
+    // can't run inside the transaction wrapping a CREATE TABLE anyway.)
+    if (preg_match_all(
+        '/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b(\s+CONCURRENTLY\b)?(?:\s+IF\s+NOT\s+EXISTS)?\s+\S+\s+ON\s+(?:ONLY\s+)?([\w.]+)/i',
+        $content,
+        $idxMatches,
+        PREG_SET_ORDER,
+    )) {
+        foreach ($idxMatches as $match) {
+            $hasConcurrently = ($match[1] ?? '') !== '';
+            if ($hasConcurrently) {
+                continue;
+            }
+
+            $table = $match[2];
+            $createdInSameFile = preg_match(
+                '/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'.preg_quote($table, '/').'\b/i',
+                $content,
+            ) === 1;
+
+            if ($createdInSameFile) {
+                continue;
+            }
+
+            $errors[] = "$basename: CREATE INDEX without CONCURRENTLY detected on `$table`.\n"
+                ."  Use: CREATE INDEX CONCURRENTLY IF NOT EXISTS ... (outside any transaction block)\n"
+                .'  See: supabase/migrations/CONVENTIONS.md §1';
+            break;
+        }
     }
 
     // ── Check 2: ADD CONSTRAINT FOREIGN KEY without NOT VALID ─────────────────
@@ -65,7 +90,7 @@ foreach (glob(MIGRATIONS_DIR.'/*.sql') as $file) {
                 $errors[] = "$basename: ADD CONSTRAINT FOREIGN KEY without NOT VALID detected.\n"
                     ."  Use: ADD CONSTRAINT <name> FOREIGN KEY (...) REFERENCES ... NOT VALID\n"
                     ."  Then: VALIDATE CONSTRAINT <name> in a separate transaction.\n"
-                    ."  See: supabase/migrations/CONVENTIONS.md §4";
+                    .'  See: supabase/migrations/CONVENTIONS.md §4';
                 break; // one error per file is enough
             }
         }
@@ -83,7 +108,7 @@ foreach (glob(MIGRATIONS_DIR.'/*.sql') as $file) {
                 $errors[] = "$basename: ADD CONSTRAINT CHECK without NOT VALID detected.\n"
                     ."  Use: ADD CONSTRAINT <name> CHECK (...) NOT VALID\n"
                     ."  Then: VALIDATE CONSTRAINT <name> in a separate transaction.\n"
-                    ."  See: supabase/migrations/CONVENTIONS.md §2";
+                    .'  See: supabase/migrations/CONVENTIONS.md §2';
                 break;
             }
         }
@@ -95,7 +120,7 @@ foreach (glob(MIGRATIONS_DIR.'/*.sql') as $file) {
     if (preg_match('/\bALTER\s+COLUMN\s+\S+\s+SET\s+NOT\s+NULL\b/i', $content)) {
         $errors[] = "$basename: ALTER COLUMN SET NOT NULL detected.\n"
             ."  Use the four-step pattern: ADD CONSTRAINT ... NOT VALID → backfill → VALIDATE → SET NOT NULL.\n"
-            ."  See: supabase/migrations/CONVENTIONS.md §3";
+            .'  See: supabase/migrations/CONVENTIONS.md §3';
     }
 }
 
