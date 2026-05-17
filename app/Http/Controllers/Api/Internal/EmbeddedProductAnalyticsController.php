@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Internal;
 
+use App\Exceptions\Shopify\ShopifyClientException;
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ResolveEmbeddedProfessional;
 use App\Models\Commerce\Order;
@@ -12,6 +13,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 // Backs the affiliate-product-block Shopify admin UI extension.
 // Returns 30-day affiliate sales for a single product: totals, variant rollup,
@@ -215,7 +217,23 @@ class EmbeddedProductAnalyticsController extends ApiController
                         $integration,
                         "gid://shopify/Product/{$productId}",
                     );
-                } catch (\Throwable) {
+                } catch (ShopifyClientException $e) {
+                    // LIFE-7: Shopify failures still cache null for the 10-min TTL so
+                    // we don't hammer Admin during an outage, but observability is
+                    // mandatory — without this log the cached null is indistinguishable
+                    // from a never-set metafield, and the UI silently shows the brand
+                    // as "newly onboarded" instead of surfacing the underlying outage.
+                    // Caught at ShopifyClientException (abstract) so Throttled/Transport/
+                    // GraphQL all funnel here while unexpected throwables propagate to
+                    // Nightwatch as real bugs.
+                    Log::warning('Shopify Admin API exception resolving product active state', [
+                        'professional_id' => $professionalId,
+                        'product_id' => $productId,
+                        'operation' => 'resolveActive',
+                        'error_class' => class_basename($e),
+                        'error' => $e->getMessage(),
+                    ]);
+
                     return null;
                 }
             },

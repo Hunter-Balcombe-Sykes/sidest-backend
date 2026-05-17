@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\Shopify\ShopifyTransportException;
 use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Services\Cache\CacheKeyGenerator;
@@ -7,6 +8,7 @@ use App\Services\Store\BrandCatalogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 use function Pest\Laravel\mock;
@@ -208,6 +210,73 @@ it('build() issues a constant number of order_items queries regardless of row co
     expect($data['totals']['commission_cents'])->toBe(50000);
     expect($data['variants'])->toHaveCount(5);
     expect($data['recent_sales'])->toHaveCount(5);
+});
+
+it('logs a warning and returns active=null when the Shopify Admin call fails (LIFE-7)', function () {
+    // Seed a Shopify integration so resolveActive proceeds to the catalog call
+    // (the no-integration short-circuit at line 209 must not fire here).
+    DB::connection('pgsql')->table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $this->brandId,
+        'provider' => 'shopify',
+        'access_token' => 'shpat_test',
+        'provider_metadata' => json_encode(['shop_domain' => 'shop.myshopify.com']),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    // Bind a fresh controller AFTER swapping the catalog mock so the constructor
+    // resolves our mock, not the singleton already injected in beforeEach().
+    mock(BrandCatalogService::class)
+        ->shouldReceive('fetchProductActiveMetafield')
+        ->once()
+        ->andThrow(new ShopifyTransportException('shop.myshopify.com', 503, '<html>upstream</html>'));
+
+    Log::spy();
+
+    $controller = app(EmbeddedProductAnalyticsController::class);
+    $data = callProductShow($controller, $this->brandId, $this->productId);
+
+    // Behaviour preserved: outage still caches null for the TTL (UI gets a
+    // well-formed response). The audit's concern was observability, not the
+    // cached-null behaviour itself.
+    expect($data['active'])->toBeNull();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->withArgs(function (string $message, array $context) {
+            return $message === 'Shopify Admin API exception resolving product active state'
+                && $context['professional_id'] === $this->brandId
+                && $context['product_id'] === $this->productId
+                && $context['operation'] === 'resolveActive'
+                && $context['error_class'] === 'ShopifyTransportException';
+        });
+});
+
+it('lets non-Shopify exceptions propagate from resolveActive (scoped catch)', function () {
+    // Regression guard for the narrowed catch — the old `catch (\Throwable)`
+    // swallowed every error class equally, masking real bugs (TypeError,
+    // DB errors mid-fetch, etc.) as "metafield not set". Pin that contract:
+    // anything that isn't a ShopifyClientException must bubble up.
+    DB::connection('pgsql')->table('core.professional_integrations')->insert([
+        'id' => (string) Str::uuid(),
+        'professional_id' => $this->brandId,
+        'provider' => 'shopify',
+        'access_token' => 'shpat_test',
+        'provider_metadata' => json_encode(['shop_domain' => 'shop.myshopify.com']),
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+
+    mock(BrandCatalogService::class)
+        ->shouldReceive('fetchProductActiveMetafield')
+        ->once()
+        ->andThrow(new RuntimeException('boom — not a Shopify error'));
+
+    $controller = app(EmbeddedProductAnalyticsController::class);
+
+    expect(fn () => callProductShow($controller, $this->brandId, $this->productId))
+        ->toThrow(RuntimeException::class, 'boom — not a Shopify error');
 });
 
 it('caches resolveActive across requests (single Shopify hit)', function () {
