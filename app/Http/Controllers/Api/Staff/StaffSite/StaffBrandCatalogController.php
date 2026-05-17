@@ -4,6 +4,9 @@ namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Api\Professional\Store\BrandCatalogController;
+use App\Http\Requests\Api\Professional\Store\ToggleProductActiveRequest;
+use App\Http\Requests\Api\Professional\Store\UpdateProductCommissionRequest;
+use App\Http\Requests\Api\Professional\Store\UpdateProductDiscountRequest;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -47,5 +50,35 @@ class StaffBrandCatalogController extends ApiController
         $request->attributes->set('professional', $professional);
 
         return $this->delegate->debug($request);
+    }
+
+    /**
+     * PATCH /staff/professionals/{professional}/brand/catalog/{productGid}/commission (#CATALOG-2)
+     */
+    public function updateCommission(UpdateProductCommissionRequest $request, Professional $professional, string $productGid): JsonResponse
+    {
+        $request->attributes->set('professional', $professional);
+
+        return $this->delegate->updateCommission($request, $productGid);
+    }
+
+    /**
+     * PATCH /staff/professionals/{professional}/brand/catalog/{productGid}/discount (#CATALOG-2)
+     */
+    public function updateDiscount(UpdateProductDiscountRequest $request, Professional $professional, string $productGid): JsonResponse
+    {
+        $request->attributes->set('professional', $professional);
+
+        return $this->delegate->updateDiscount($request, $productGid);
+    }
+
+    /**
+     * PATCH /staff/professionals/{professional}/brand/catalog/{productGid}/active (#CATALOG-2)
+     */
+    public function toggleActive(ToggleProductActiveRequest $request, Professional $professional, string $productGid): JsonResponse
+    {
+        $request->attributes->set('professional', $professional);
+
+        return $this->delegate->toggleActive($request, $productGid);
     }
 }
