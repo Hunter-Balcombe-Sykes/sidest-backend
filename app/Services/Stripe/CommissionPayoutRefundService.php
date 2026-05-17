@@ -102,6 +102,9 @@ class CommissionPayoutRefundService
 
             if ($payout->status === 'processing') {
                 $this->flagMidFlight($payout, $order);
+                // needs_manual_refund flip is visible on the brand's payout dashboard.
+                // Bust caches so the warning surfaces without waiting for TTL.
+                $this->bustPayoutCaches($order);
 
                 return null;
             }
@@ -115,9 +118,7 @@ class CommissionPayoutRefundService
 
             $this->adjustRollup($order);
 
-            $this->analyticsCache->bumpAnalyticsVersion($order->affiliate_professional_id);
-            $this->analyticsCache->bumpAnalyticsVersion($order->brand_professional_id);
-            Cache::forget(CacheKeyGenerator::affiliatePayoutState($order->affiliate_professional_id));
+            $this->bustPayoutCaches($order);
 
             return null;
         });
@@ -129,7 +130,24 @@ class CommissionPayoutRefundService
         // afterCommit fires immediately when no transaction is open, and defers
         // to the outermost commit when this service is called inside a caller's
         // transaction — guaranteeing the Stripe HTTP call holds no row locks.
-        DB::afterCommit(fn () => $this->executeClawback($clawbackPlan));
+        DB::afterCommit(fn () => $this->executeClawback($clawbackPlan, $order));
+    }
+
+    /**
+     * Forget every cache key that derives from an affiliate's payout state after
+     * a refund-driven mutation. Bumps analytics version for both sides of the
+     * payout (affiliate + brand) and clears both the primary and `:stale` SWR
+     * twin of affiliatePayoutState — forgetting only the primary leaves
+     * CacheLockService::rememberLocked serving the stale copy until TTL expires.
+     */
+    private function bustPayoutCaches(Order $order): void
+    {
+        $this->analyticsCache->bumpAnalyticsVersion($order->affiliate_professional_id);
+        $this->analyticsCache->bumpAnalyticsVersion($order->brand_professional_id);
+
+        $stateKey = CacheKeyGenerator::affiliatePayoutState($order->affiliate_professional_id);
+        Cache::forget($stateKey);
+        Cache::forget($stateKey.':stale');
     }
 
     /**
@@ -313,8 +331,11 @@ class CommissionPayoutRefundService
      *   idempotency_key: string,
      *   fee_ratio: float
      * }  $plan
+     * @param  Order  $order  Carries affiliate/brand professional ids for cache busting
+     *                        after the clawback row is written (success) or
+     *                        needs_manual_refund is flipped (failure).
      */
-    private function executeClawback(array $plan): void
+    private function executeClawback(array $plan, Order $order): void
     {
         try {
             $refund = $this->stripe->refunds->create([
@@ -354,6 +375,8 @@ class CommissionPayoutRefundService
                 ]);
             });
 
+            $this->bustPayoutCaches($order);
+
             Log::notice('payout.clawback.refunded', [
                 'payout_id' => $plan['payout_id'],
                 'order_id' => $plan['order_id'],
@@ -385,6 +408,8 @@ class CommissionPayoutRefundService
                     ],
                 ]);
             });
+
+            $this->bustPayoutCaches($order);
 
             Log::error('payout.clawback.refund_failed', [
                 'payout_id' => $plan['payout_id'],

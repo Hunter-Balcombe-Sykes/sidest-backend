@@ -435,6 +435,62 @@ it('payoutDetail returns the payout and its linked orders for the affiliate', fu
     expect($data['payout']['gross_commission_cents'])->toBe(5000);
     expect($data['orders'])->toHaveCount(2);
     expect(collect($data['orders'])->pluck('id')->all())->toContain('ord-1', 'ord-2');
+    // Under the cap (2 < default 500) → has_more must be false.
+    expect($data['has_more'])->toBeFalse();
+});
+
+it('payoutDetail caps orders at config(partna.payouts.detail_orders_limit) with has_more=true', function () {
+    setupCommerceOrdersTables();
+
+    seedPayoutProfessional('pro-aff-cap', 'affcap', 'Aff Cap', 'influencer');
+    seedPayoutProfessional('pro-brand-cap', 'brandcap', 'Brand Cap');
+
+    seedCommissionPayoutRow([
+        'id' => 'pay-cap-1',
+        'brand_professional_id' => 'pro-brand-cap',
+        'affiliate_professional_id' => 'pro-aff-cap',
+        'gross_commission_cents' => 50000,
+        'ledger_entry_count' => 5,
+    ]);
+
+    // Drop the cap to 3 so we don't need to seed 500+ rows.
+    config(['partna.payouts.detail_orders_limit' => 3]);
+
+    $now = now()->toDateTimeString();
+    for ($i = 0; $i < 5; $i++) {
+        \Illuminate\Support\Facades\DB::connection('pgsql')->table('commerce.orders')->insert([
+            'id' => "ord-cap-{$i}",
+            'shopify_order_id' => "shop_cap_{$i}",
+            'shopify_shop_domain' => 'cap.myshopify.com',
+            'brand_professional_id' => 'pro-brand-cap',
+            'affiliate_professional_id' => 'pro-aff-cap',
+            'status' => 'approved',
+            'gross_cents' => 5000,
+            'commission_cents' => 2500,
+            'refund_cents' => 0,
+            'net_cents' => 5000,
+            'commission_rate' => 50,
+            'rate_source' => 'brand_default',
+            'currency_code' => 'AUD',
+            'payout_id' => 'pay-cap-1',
+            'occurred_at' => now()->subMinutes(5 - $i)->toDateTimeString(),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    $summary = Mockery::mock(CommissionPayoutService::class);
+    $aff = Professional::query()->find('pro-aff-cap');
+
+    $request = \Illuminate\Http\Request::create('/api/stripe/payouts/pay-cap-1', 'GET');
+    $request->attributes->set('professional', $aff);
+
+    $data = makePayoutsController($summary)->payoutDetail($request, 'pay-cap-1')->getData(true);
+
+    // Cap=3 enforced even though 5 orders exist; frontend uses has_more=true
+    // to render a "load more / export" affordance.
+    expect($data['orders'])->toHaveCount(3);
+    expect($data['has_more'])->toBeTrue();
 });
 
 it('payoutDetail returns 404 for missing payout via findOrFail', function () {

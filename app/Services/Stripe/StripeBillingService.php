@@ -44,6 +44,11 @@ class StripeBillingService
     /**
      * Create a Stripe Checkout Session in subscription mode.
      * Returns the checkout URL for frontend redirect.
+     *
+     * Idempotency: keyed by (professional, plan, hour-bucket). Deduplicates
+     * frontend double-submits and network retries within the same hour, while
+     * still allowing a legitimate re-attempt the following hour if the user
+     * abandoned the first session.
      */
     public function createCheckoutSession(
         Professional $professional,
@@ -52,6 +57,10 @@ class StripeBillingService
         string $cancelUrl,
     ): array {
         $customerId = $this->ensureStripeCustomer($professional);
+
+        // Carbon-backed timestamp so Carbon::setTestNow() can freeze it in tests.
+        $hourBucket = (int) floor(now()->timestamp / 3600);
+        $idempotencyKey = "checkout_{$professional->id}_{$plan->id}_{$hourBucket}";
 
         $session = $this->stripe->checkout->sessions->create([
             'customer' => $customerId,
@@ -74,7 +83,7 @@ class StripeBillingService
                 'sidest_professional_id' => $professional->id,
                 'sidest_plan_id' => $plan->id,
             ],
-        ]);
+        ], ['idempotency_key' => $idempotencyKey]);
 
         return [
             'checkout_url' => $session->url,

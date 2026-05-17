@@ -424,10 +424,21 @@ class StripeConnectController extends Controller
 
         Gate::forUser($pro)->authorize('view', $payout);
 
+        // Bound the in-memory order set so a high-volume payout (hundreds of orders)
+        // can't materialise an unbounded result on the request thread. Frontend uses
+        // `has_more` to decide between a "load more" affordance and pointing the
+        // user at the export endpoint (which is also capped at 500 in ExportService).
+        $limit = (int) config('partna.payouts.detail_orders_limit', 500);
         $orders = \App\Models\Commerce\Order::query()
             ->where('payout_id', $payoutId)
             ->orderBy('occurred_at')
+            ->limit($limit + 1)
             ->get();
+
+        $hasMore = $orders->count() > $limit;
+        if ($hasMore) {
+            $orders = $orders->take($limit);
+        }
 
         return response()->json([
             'payout' => $this->shapePayoutListRow($payout),
@@ -443,6 +454,7 @@ class StripeConnectController extends Controller
                 'currency_code' => $o->currency_code,
                 'occurred_at' => $o->occurred_at?->toIso8601String(),
             ])->values(),
+            'has_more' => $hasMore,
         ]);
     }
 

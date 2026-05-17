@@ -939,6 +939,14 @@ return [
         'commission_void_window_days' => (int) env('PARTNA_STORE_COMMISSION_VOID_WINDOW_DAYS', env('SIDEST_STORE_COMMISSION_VOID_WINDOW_DAYS', 30)),
     ],
 
+    'payouts' => [
+        // Cap on rows materialised by /stripe/payouts/{payoutId} (payoutDetail).
+        // Matches the 500-row limit ExportService passes to forBrand/forAffiliate,
+        // so the "export the rest" fallback is the natural overflow path. Frontend
+        // reads `has_more` to render a load-more / export affordance.
+        'detail_orders_limit' => (int) env('PARTNA_PAYOUTS_DETAIL_ORDERS_LIMIT', 500),
+    ],
+
     'form_timing' => [
         'min_ms' => (int) env('FORM_TIMING_MIN_MS', 2500),      // 2.5s minimum fill time
         'max_ms' => (int) env('FORM_TIMING_MAX_MS', 43200000),  // 12h max (stale form)

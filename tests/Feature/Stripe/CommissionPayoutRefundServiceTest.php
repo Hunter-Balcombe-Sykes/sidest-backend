@@ -3,7 +3,9 @@
 use App\Models\Commerce\Order;
 use App\Models\Retail\CommissionPayout;
 use App\Models\Retail\CommissionPayoutItem;
+use App\Services\Cache\CacheKeyGenerator;
 use App\Services\Stripe\CommissionPayoutRefundService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
@@ -204,6 +206,65 @@ it('refund of order in processing sets needs_manual_refund', function () {
     app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
 
     expect($payout->fresh()->needs_manual_refund)->toBeTrue();
+});
+
+// ─── Cache invalidation: pending path clears both primary AND :stale twin ───
+
+it('pending-path refund forgets both the affiliatePayoutState primary key and its :stale twin', function () {
+    $payout = CommissionPayout::factory()->create([
+        'status' => 'pending',
+        'gross_commission_cents' => 5000,
+        'ledger_entry_count' => 1,
+    ]);
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'commission_cents' => 5000,
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+    CommissionPayoutItem::factory()->create([
+        'payout_id' => $payout->id,
+        'order_id' => $order->id,
+        'amount_cents' => 5000,
+    ]);
+
+    // Pre-seed both keys so we can confirm both get forgotten. CacheLockService writes
+    // a `:stale` twin alongside the primary as part of its SWR contract — forgetting
+    // only the primary leaves rememberLocked serving the stale copy.
+    $primaryKey = CacheKeyGenerator::affiliatePayoutState($order->affiliate_professional_id);
+    $staleKey = $primaryKey.':stale';
+    Cache::put($primaryKey, 'pre-refund-primary', 60);
+    Cache::put($staleKey, 'pre-refund-stale', 600);
+
+    $order->forceFill(['status' => 'refunded', 'refund_cents' => $order->gross_cents])->save();
+    app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
+
+    expect(Cache::get($primaryKey))->toBeNull();
+    expect(Cache::get($staleKey))->toBeNull();
+});
+
+it('processing-path refund forgets both the affiliatePayoutState primary key and its :stale twin', function () {
+    $payout = CommissionPayout::factory()->create(['status' => 'processing']);
+    $order = Order::factory()->create([
+        'payout_id' => $payout->id,
+        'status' => 'refunded',
+        'refund_cents' => 10000,
+        'brand_professional_id' => $payout->brand_professional_id,
+        'affiliate_professional_id' => $payout->affiliate_professional_id,
+    ]);
+
+    $primaryKey = CacheKeyGenerator::affiliatePayoutState($order->affiliate_professional_id);
+    $staleKey = $primaryKey.':stale';
+    Cache::put($primaryKey, 'pre-refund-primary', 60);
+    Cache::put($staleKey, 'pre-refund-stale', 600);
+
+    app(CommissionPayoutRefundService::class)->handleOrderRefund($order);
+
+    // needs_manual_refund flip is visible on the brand's dashboard — must surface
+    // without waiting for the analytics TTL.
+    expect($payout->fresh()->needs_manual_refund)->toBeTrue();
+    expect(Cache::get($primaryKey))->toBeNull();
+    expect(Cache::get($staleKey))->toBeNull();
 });
 
 // ─── No-op when order has no payout ─────────────────────────────────────────

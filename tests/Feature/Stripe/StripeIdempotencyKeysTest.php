@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Billing\Plan;
 use App\Models\Core\Professional\Professional;
 use App\Services\Stripe\StripeBillingService;
 use App\Services\Stripe\StripeConnectService;
@@ -11,6 +12,7 @@ use Stripe\StripeClient;
 //
 // v2 key formats:
 //   - Billing customer:  customer_{professional_id}
+//   - Billing checkout session: checkout_{professional_id}_{plan_id}_{hour_bucket}
 //   - Brand v2 Account:  acct_brand_{professional_id}
 //   - Affiliate v2 Account: acct_affiliate_{professional_id}
 //   - CommissionPayoutService PI: pi_{payout_id}[_r{retry}]  (covered in CommissionPayoutServiceTest)
@@ -39,6 +41,21 @@ beforeEach(function () {
         } catch (\Throwable) {
         }
     }
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS billing.plans (
+        id TEXT PRIMARY KEY,
+        plan_key TEXT NOT NULL,
+        name TEXT NULL,
+        stripe_price_id TEXT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NULL,
+        price_cents INTEGER NULL,
+        currency_code TEXT NULL,
+        billing_interval TEXT NULL,
+        entitlements TEXT NULL,
+        created_at TEXT NULL,
+        updated_at TEXT NULL
+    )');
 
     $conn->statement('CREATE TABLE IF NOT EXISTS core.professional_integrations (
         id TEXT PRIMARY KEY,
@@ -135,6 +152,70 @@ it('ensureStripeCustomer relies on Stripe idempotency for dedup (no professional
 
     expect($service->ensureStripeCustomer($professional))->toBe('cus_dedup_via_stripe');
     expect($service->ensureStripeCustomer($professional))->toBe('cus_dedup_via_stripe');
+});
+
+// ── StripeBillingService::createCheckoutSession ────────────────────────────
+
+it('createCheckoutSession passes hour-bucketed idempotency_key to Stripe', function () {
+    $professional = idempotencyTest_makeProfessional();
+
+    $planId = (string) Str::uuid();
+    DB::connection('pgsql')->table('billing.plans')->insert([
+        'id' => $planId,
+        'plan_key' => 'growth',
+        'name' => 'Growth',
+        'stripe_price_id' => 'price_growth_test',
+        'is_active' => 1,
+        'created_at' => now()->toDateTimeString(),
+        'updated_at' => now()->toDateTimeString(),
+    ]);
+    $plan = Plan::find($planId);
+
+    // Fix wall-clock so the test asserts a known hour bucket regardless of when CI runs.
+    $frozen = \Carbon\Carbon::parse('2026-05-17 14:30:00');
+    \Illuminate\Support\Carbon::setTestNow($frozen);
+    $expectedBucket = (int) floor($frozen->timestamp / 3600);
+    $expectedKey = "checkout_{$professional->id}_{$plan->id}_{$expectedBucket}";
+
+    $customersSpy = Mockery::mock();
+    $customersSpy->shouldReceive('create')->andReturn((object) ['id' => 'cus_for_checkout']);
+
+    $sessionsSpy = Mockery::mock();
+    $sessionsSpy->shouldReceive('create')
+        ->once()
+        ->withArgs(function (array $params, array $opts = []) use ($expectedKey, $professional, $plan) {
+            expect($opts)->toHaveKey('idempotency_key');
+            expect($opts['idempotency_key'])->toBe($expectedKey);
+
+            expect($params['mode'])->toBe('subscription');
+            expect($params['line_items'][0]['price'])->toBe($plan->stripe_price_id);
+            expect($params['metadata']['sidest_professional_id'])->toBe($professional->id);
+            expect($params['metadata']['sidest_plan_id'])->toBe($plan->id);
+
+            return true;
+        })
+        ->andReturn((object) ['id' => 'cs_test_123', 'url' => 'https://stripe.test/cs_123']);
+
+    $stripeClient = Mockery::mock(StripeClient::class);
+    $stripeClient->shouldReceive('getService')->with('customers')->andReturn($customersSpy);
+    $stripeClient->checkout = (object) ['sessions' => $sessionsSpy];
+
+    $service = new StripeBillingService;
+    $reflProp = (new ReflectionClass($service))->getProperty('stripe');
+    $reflProp->setAccessible(true);
+    $reflProp->setValue($service, $stripeClient);
+
+    $result = $service->createCheckoutSession(
+        $professional,
+        $plan,
+        'https://example.test/success',
+        'https://example.test/cancel',
+    );
+
+    expect($result['session_id'])->toBe('cs_test_123');
+    expect($result['checkout_url'])->toBe('https://stripe.test/cs_123');
+
+    \Illuminate\Support\Carbon::setTestNow();
 });
 
 // ── StripeConnectService::createConnectAccount (brand → v2) ─────────────────
