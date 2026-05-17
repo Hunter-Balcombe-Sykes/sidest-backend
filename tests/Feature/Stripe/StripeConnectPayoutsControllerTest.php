@@ -437,7 +437,7 @@ it('payoutDetail returns the payout and its linked orders for the affiliate', fu
     expect(collect($data['orders'])->pluck('id')->all())->toContain('ord-1', 'ord-2');
 });
 
-it('payoutDetail aborts 404 for missing payout', function () {
+it('payoutDetail returns 404 for missing payout via findOrFail', function () {
     seedPayoutProfessional('pro-aff-d2', 'affd2', 'Aff D2', 'influencer');
 
     $summary = Mockery::mock(CommissionPayoutService::class);
@@ -446,10 +446,11 @@ it('payoutDetail aborts 404 for missing payout', function () {
     $request = \Illuminate\Http\Request::create('/api/stripe/payouts/does-not-exist', 'GET');
     $request->attributes->set('professional', $aff);
 
-    // abort_if($payout === null, 404) → NotFoundHttpException, rendered as JSON 404 by
-    // bootstrap/app.php's exception handler at request time.
+    // findOrFail → ModelNotFoundException → rendered as JSON 404 "Resource not found"
+    // by bootstrap/app.php's exception handler at request time. Same envelope as the
+    // cross-tenant policy denial, unlike NotFoundHttpException.
     expect(fn () => makePayoutsController($summary)->payoutDetail($request, 'does-not-exist'))
-        ->toThrow(\Symfony\Component\HttpKernel\Exception\NotFoundHttpException::class);
+        ->toThrow(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
 });
 
 it('payoutDetail denies a foreign payout via CommissionPolicy (cross-tenant)', function () {

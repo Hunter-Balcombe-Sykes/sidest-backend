@@ -413,15 +413,14 @@ class StripeConnectController extends Controller
     {
         $pro = $request->attributes->get('professional');
 
+        // findOrFail throws ModelNotFoundException → rendered as 404 "Resource not found"
+        // by bootstrap/app.php. CommissionPolicy::view's denyAsNotFound() path renders the
+        // same shape via HttpException(404) — both 404s match envelope. NotFoundHttpException
+        // (what abort(404) throws) would render "Endpoint not found", which is wrong here.
         $payout = CommissionPayout::with([
             'brandProfessional:id,display_name,handle',
             'affiliateProfessional:id,display_name,handle',
-        ])->find($payoutId);
-
-        // CommissionPolicy::view() is typed Model $record, so it can't accept null.
-        // Handle missing-payout 404 here; cross-tenant 404 is enforced by the policy
-        // via denyAsNotFound() (rendered as 404 in bootstrap/app.php).
-        abort_if($payout === null, 404);
+        ])->findOrFail($payoutId);
 
         Gate::forUser($pro)->authorize('view', $payout);
 
