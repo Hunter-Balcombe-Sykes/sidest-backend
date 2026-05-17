@@ -16,9 +16,12 @@
 #   when you want broad coverage and don't have a specific theme.
 #
 # Phase organization (optional):
-#   Pass --phase <name> to organize output under audits/<name>/. Drafts (when
-#   --keep-drafts is also set) land in audits/<name>/.drafts/. Without --phase,
-#   files default to CWD (current behavior — orchestrator-compatible).
+#   Output always lands in audits/. Pass --phase <name> to organize further
+#   under audits/<name>/. Drafts (when --keep-drafts is also set) land in
+#   audits/<name>/.drafts/.
+#
+#     scripts/audit/audit.sh --lens "policy coverage" --scope app/Policies
+#     # → audits/audit-YYYY-MM-DD-policy-coverage.md
 #
 #     scripts/audit/audit.sh --phase phase-1-security \
 #       --lens "policy coverage" --scope app/Policies
@@ -78,12 +81,12 @@ fi
 [[ -n "${DEEPSEEK_API_KEY:-}" ]]  || { echo "DEEPSEEK_API_KEY not found (set in scripts/audit/.env or export)" >&2; exit 2; }
 command -v claude >/dev/null      || { echo "claude CLI not on PATH — install from claude.ai/code" >&2; exit 2; }
 
-# --- Phase folder (optional) ---
-BASE_DIR=""
+# --- Output folder: always audits/, optionally with a phase subfolder ---
+BASE_DIR="audits"
 if [[ -n "$PHASE" ]]; then
     BASE_DIR="audits/${PHASE}"
-    mkdir -p "$BASE_DIR"
 fi
+mkdir -p "$BASE_DIR"
 
 # --- Drafts location ---
 if $KEEP_DRAFTS; then
