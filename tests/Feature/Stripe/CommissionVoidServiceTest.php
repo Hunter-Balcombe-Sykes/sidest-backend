@@ -49,9 +49,13 @@ beforeEach(function () {
     )');
 });
 
-function seedVoidAffiliate(string $id, string $stripeStatus = 'not_connected', ?string $gracePeriodEndsAt = null): void
-{
-    $now = now()->toDateTimeString();
+function seedVoidAffiliate(
+    string $id,
+    string $stripeStatus = 'not_connected',
+    ?string $gracePeriodEndsAt = null,
+    ?string $createdAt = null,
+): void {
+    $createdAt = $createdAt ?? now()->toDateTimeString();
     DB::connection('pgsql')->table('core.professionals')->insert([
         'id' => $id,
         'handle' => "affiliate-{$id}",
@@ -61,8 +65,8 @@ function seedVoidAffiliate(string $id, string $stripeStatus = 'not_connected', ?
         'status' => 'active',
         'stripe_connect_status' => $stripeStatus,
         'stripe_grace_period_ends_at' => $gracePeriodEndsAt,
-        'created_at' => $now,
-        'updated_at' => $now,
+        'created_at' => $createdAt,
+        'updated_at' => $createdAt,
     ]);
 }
 
@@ -335,4 +339,109 @@ it('does not send a payout expiry warning when the affiliate has active Stripe',
     seedVoidPayout('p1', 'aff-1', 'brand-1', voidAt: now()->addDays(10)->midDay()->toDateTimeString());
 
     $service->sendGracePeriodWarnings();
+});
+
+// ============================================================
+// #STRP-2 — Signup grace-period warnings (day 20 / day 28)
+// Rewires the v1 `stripe_grace_period_ends_at` flow onto `created_at` —
+// the original column was defined as `created_at + signup_grace_period_days`,
+// so this is an identity-equivalent restoration.
+// ============================================================
+
+it('sends the 10-days-left signup warning for an affiliate who signed up 20 days ago with pending commissions', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) => $professionalId === 'aff-1'
+            && $title === 'Connect Stripe — 10 days left'
+            && str_contains($dedupeKey, 'signup_10d_left')
+        );
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected', createdAt: now()->subDays(20)->midDay()->toDateTimeString());
+    // Fresh pending commission so the affiliate has earnings at stake.
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1500, occurredAt: now()->subDays(2)->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(1);
+});
+
+it('sends the 2-days-left signup warning for an affiliate who signed up 28 days ago with pending commissions', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldReceive('publish')
+        ->once()
+        ->withArgs(fn ($professionalId, $frontendType, $category, $title, $body, $dedupeKey) => $professionalId === 'aff-1'
+            && $title === 'Connect Stripe — 2 days left'
+            && str_contains($dedupeKey, 'signup_2d_left')
+        );
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected', createdAt: now()->subDays(28)->midDay()->toDateTimeString());
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1500, occurredAt: now()->subDays(2)->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(1);
+});
+
+it('does not send a signup warning for an affiliate who signed up today', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected', createdAt: now()->toDateTimeString());
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1500, occurredAt: now()->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(0);
+});
+
+it('does not send a signup warning for an affiliate past their grace period', function () {
+    // Day 35 — past the 30-day default grace; this affiliate is now in the
+    // per-commission warning path, not the signup path.
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'not_connected', createdAt: now()->subDays(35)->midDay()->toDateTimeString());
+    // Use a commission that's fresh enough to NOT trigger the per-commission warning
+    // (which fires inside the 25-30d window), so we're isolating the signup path.
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1500, occurredAt: now()->subDays(2)->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(0);
+});
+
+it('does not send a signup warning to an affiliate at day 20 with no pending commissions', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidAffiliate('aff-1', 'not_connected', createdAt: now()->subDays(20)->midDay()->toDateTimeString());
+    // No commissions seeded — nothing at stake, so no warning.
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(0);
+});
+
+it('does not send a signup warning to an affiliate with active Stripe at day 20', function () {
+    $publisher = Mockery::mock(NotificationPublisher::class);
+    $publisher->shouldNotReceive('publish');
+    $service = new CommissionVoidService($publisher);
+
+    seedVoidBrand('brand-1');
+    seedVoidAffiliate('aff-1', 'active', createdAt: now()->subDays(20)->midDay()->toDateTimeString());
+    seedVoidCommission('c1', 'brand-1', 'aff-1', 1500, occurredAt: now()->subDays(2)->toDateTimeString());
+
+    $stats = $service->sendGracePeriodWarnings();
+
+    expect($stats['warnings_sent'])->toBe(0);
 });

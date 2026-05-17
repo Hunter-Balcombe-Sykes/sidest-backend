@@ -356,25 +356,38 @@ class CommissionVoidService
     }
 
     /**
-     * Day 20 and day 28 warnings for affiliates in their initial grace period.
+     * Signup grace-period warnings: fired at "10 days left" and "2 days left"
+     * before a non-active affiliate's signup grace deadline.
+     *
+     * v2 proxy: the deadline is computed as `professionals.created_at + signup_grace_period_days`
+     * (default 30d). This restores the original v1 semantics — the dropped
+     * `stripe_grace_period_ends_at` column was itself defined as `created_at + 30 days`
+     * (see 20260416000000_add_commission_grace_period.sql), so `created_at` is a
+     * direct, lossless replacement signal. No schema change is needed.
+     *
+     * Windows scale with `partna.store.signup_grace_period_days` so re-tuning the
+     * grace length (e.g., to 60d) keeps the "10/2 days left" semantics intact.
+     * Only affiliates with positive pending commissions are notified.
      */
     private function sendSignupWarnings(): int
     {
         $sent = 0;
-
-        // TODO[stripe-v2]: stripe_grace_period_ends_at column dropped. Grace
-        // period warnings (day 20 and day 28) need v2 re-implementation in Phase 4.
-        // Short-circuited: always returns 0 until Phase 4 restores the grace period logic.
-        return 0;
+        $graceDays = (int) config('partna.store.signup_grace_period_days', 30);
 
         $warningWindows = [
-            'day20' => [
-                'range' => [now()->addDays(10)->startOfDay(), now()->addDays(10)->endOfDay()],
+            'signup_10d_left' => [
+                'created_range' => [
+                    now()->subDays($graceDays - 10)->startOfDay(),
+                    now()->subDays($graceDays - 10)->endOfDay(),
+                ],
                 'title' => 'Connect Stripe — 10 days left',
                 'body' => 'Connect your Stripe account within 10 days or your %s in pending earnings will be forfeited.',
             ],
-            'day28' => [
-                'range' => [now()->addDays(2)->startOfDay(), now()->addDays(2)->endOfDay()],
+            'signup_2d_left' => [
+                'created_range' => [
+                    now()->subDays($graceDays - 2)->startOfDay(),
+                    now()->subDays($graceDays - 2)->endOfDay(),
+                ],
                 'title' => 'Connect Stripe — 2 days left',
                 'body' => '2 days left — connect Stripe now or your %s in pending earnings will be forfeited.',
             ],
@@ -384,8 +397,9 @@ class CommissionVoidService
             Professional::query()
                 ->whereIn('professional_type', ['influencer', 'professional'])
                 ->where('stripe_connect_status', '!=', 'active')
+                ->whereBetween('created_at', $window['created_range'])
                 ->chunkById(200, function ($affiliates) use (&$sent, $key, $window) {
-                    // Batch-load pending amounts for the chunk to avoid N+1
+                    // Batch-load pending amounts for the chunk to avoid N+1.
                     $pendingAmounts = $this->getPendingCommissionCentsBatch(
                         $affiliates->pluck('id')->all()
                     );
@@ -427,9 +441,11 @@ class CommissionVoidService
         $windowStart = now()->subDays($voidWindowDays);
         $windowEnd = now()->subDays($voidWindowDays - 5);
 
-        // TODO[stripe-v2]: stripe_grace_period_ends_at column dropped. All
-        // non-active affiliates are now treated as past-grace (no grace period
-        // distinction available). Phase 4 will add capability-based checks.
+        // v2 model: all non-active affiliates are eligible for per-commission warnings.
+        // The "grace period" distinction (v1's stripe_grace_period_ends_at) is replaced
+        // by sendSignupWarnings (created_at-based) for the early signup nudges, while
+        // this method handles the per-commission 5-day expiry warning. Both can fire
+        // for the same affiliate — they target different deadlines.
         $inactiveAffiliateIds = Professional::query()
             ->where('stripe_connect_status', '!=', 'active')
             ->pluck('id')
