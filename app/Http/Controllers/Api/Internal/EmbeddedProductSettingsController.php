@@ -598,60 +598,93 @@ GRAPHQL;
     }
 
     /**
-     * Update variant enabled states. Disabled variant GIDs get sidest.enabled=false;
-     * all other variants of the same product get sidest.enabled=true.
+     * Update variant enabled states for a product in a single Shopify call.
+     *
+     * Computes the diff between the variants Shopify currently reports and
+     * the desired disabled-set, then issues ONE productVariantsBulkUpdate
+     * mutation carrying the partna.enabled metafield for every variant that
+     * changed (SCALE-3). Skipping the mutation entirely when nothing changed
+     * keeps the typical "click Save with no toggles" path free of Shopify
+     * round-trips beyond the variant fetch.
      */
     private function saveVariantEnabledStates(ProfessionalIntegration $integration, string $productGid, array $disabledGids): void
     {
         $variants = $this->fetchVariants($integration, $this->extractId($productGid));
 
+        // Build the variants[] payload from the diff only — variants whose
+        // state matches the desired state are omitted so the request stays
+        // small and we can short-circuit when no work is needed.
+        $changedVariants = [];
         foreach ($variants as $variant) {
             $shouldEnable = ! in_array($variant['gid'], $disabledGids, true);
-            if ($variant['enabled'] !== $shouldEnable) {
-                $this->saveVariantMetafield($integration, $variant['gid'], $shouldEnable);
+            if ($variant['enabled'] === $shouldEnable) {
+                continue;
             }
+            $changedVariants[] = [
+                'id' => $variant['gid'],
+                'metafields' => [[
+                    'namespace' => 'partna',
+                    'key' => 'enabled',
+                    'value' => $shouldEnable ? 'true' : 'false',
+                    'type' => 'boolean',
+                ]],
+            ];
         }
+
+        if ($changedVariants === []) {
+            return;
+        }
+
+        $this->bulkUpdateVariantMetafields($integration, $productGid, $changedVariants);
     }
 
     /**
-     * Set sidest.enabled on a single variant.
+     * Issue a single productVariantsBulkUpdate mutation to write metafields
+     * on the given set of variants. Surfaces network and userErrors as
+     * exceptions so update() can map them to 422.
+     *
+     * @param  array<int, array{id: string, metafields: array<int, array<string, string>>}>  $variants
      */
-    private function saveVariantMetafield(ProfessionalIntegration $integration, string $variantGid, bool $enabled): void
+    private function bulkUpdateVariantMetafields(ProfessionalIntegration $integration, string $productGid, array $variants): void
     {
         $shopDomain = trim((string) Arr::get($integration->provider_metadata ?? [], 'shop_domain', ''));
         $adminToken = trim((string) ($integration->access_token ?? ''));
         $apiVersion = config('services.shopify.api_version');
 
         if ($shopDomain === '' || $adminToken === '') {
-            return;
+            throw new \RuntimeException('Shopify integration is missing credentials.');
         }
 
-        $values = $enabled ? 'true' : 'false';
-
         $mutation = <<<'GRAPHQL'
-mutation setVariantMetafield($input: ProductVariantInput!) {
-  productVariantUpdate(input: $input) {
-    productVariant { id }
+mutation bulkUpdateVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariants { id }
     userErrors { field message }
   }
 }
 GRAPHQL;
 
-        Http::timeout(15)
+        $response = Http::timeout(15)
             ->acceptJson()
             ->withHeaders(['X-Shopify-Access-Token' => $adminToken])
             ->post("https://{$shopDomain}/admin/api/{$apiVersion}/graphql.json", [
                 'query' => $mutation,
-                'variables' => ['input' => [
-                    'id' => $variantGid,
-                    'metafields' => [[
-                        'namespace' => 'partna',
-                        'key' => 'enabled',
-                        'value' => $values,
-                        'type' => 'boolean',
-                    ]],
-                ]],
+                'variables' => [
+                    'productId' => $productGid,
+                    'variants' => $variants,
+                ],
             ]);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException("Shopify API returned {$response->status()}");
+        }
+
+        $data = $response->json();
+        $errors = Arr::get($data, 'data.productVariantsBulkUpdate.userErrors', []);
+        if (! empty($errors)) {
+            $msg = is_array($errors) ? ($errors[0]['message'] ?? 'Unknown error') : 'Unknown error';
+            throw new \RuntimeException($msg);
+        }
     }
 
     /**

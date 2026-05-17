@@ -266,8 +266,16 @@ it('saves variant enabled states only for variants whose state actually changed'
                     ],
                 ],
             ], 200)
-            // productVariantUpdate mutation for variant 2 (the one being disabled).
-            ->push(['data' => ['productVariantUpdate' => ['productVariant' => ['id' => 'gid://shopify/ProductVariant/2'], 'userErrors' => []]]], 200),
+            // productVariantsBulkUpdate mutation — single bulk call (SCALE-3),
+            // returning just the one variant that changed.
+            ->push([
+                'data' => [
+                    'productVariantsBulkUpdate' => [
+                        'productVariants' => [['id' => 'gid://shopify/ProductVariant/2']],
+                        'userErrors' => [],
+                    ],
+                ],
+            ], 200),
     ]);
 
     $request = makeProductSettingsUpdateRequest($this->brandId, [
@@ -279,8 +287,160 @@ it('saves variant enabled states only for variants whose state actually changed'
 
     expect($response->getStatusCode())->toBe(200);
 
-    // Exactly two requests: one variants fetch + one variant update (variant 1 was already enabled).
+    // Exactly two requests: one variants fetch + one bulk variant update.
     Http::assertSentCount(2);
+});
+
+it('issues a single bulk mutation when multiple variant states change (SCALE-3)', function () {
+    // Regression guard: the old per-variant loop would have issued N writes
+    // here. The bulk implementation must collapse them into one
+    // productVariantsBulkUpdate call regardless of how many variants flip.
+    seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
+
+    Http::fake([
+        "https://{$this->shopDomain}/admin/api/*" => Http::sequence()
+            // fetchVariants — three variants, all currently enabled.
+            ->push([
+                'data' => [
+                    'product' => [
+                        'variants' => [
+                            'edges' => [
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/1', 'title' => 'S', 'enabled' => ['value' => 'true']]],
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/2', 'title' => 'M', 'enabled' => ['value' => 'true']]],
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/3', 'title' => 'L', 'enabled' => ['value' => 'true']]],
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200)
+            // One bulk mutation flips variants 2 + 3 together.
+            ->push([
+                'data' => [
+                    'productVariantsBulkUpdate' => [
+                        'productVariants' => [
+                            ['id' => 'gid://shopify/ProductVariant/2'],
+                            ['id' => 'gid://shopify/ProductVariant/3'],
+                        ],
+                        'userErrors' => [],
+                    ],
+                ],
+            ], 200),
+    ]);
+
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
+        'product_gid' => $this->productGid,
+        'field' => 'disabled_variant_gids',
+        'value' => ['gid://shopify/ProductVariant/2', 'gid://shopify/ProductVariant/3'],
+    ]);
+    $response = $this->controller->update($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    // Critical: fetch + ONE bulk write, NOT 1 + N.
+    Http::assertSentCount(2);
+
+    // Bulk payload shape: productId on the mutation; variants[] carries only
+    // the diff — variant 1 was already enabled and must NOT appear.
+    Http::assertSent(function ($req) {
+        $body = json_decode($req->body(), true);
+        if (! str_contains($body['query'] ?? '', 'productVariantsBulkUpdate')) {
+            return false;
+        }
+        $variables = $body['variables'] ?? [];
+        if (($variables['productId'] ?? null) !== $this->productGid) {
+            return false;
+        }
+        $variants = $variables['variants'] ?? [];
+        if (count($variants) !== 2) {
+            return false;
+        }
+        $ids = array_column($variants, 'id');
+        sort($ids);
+        if ($ids !== ['gid://shopify/ProductVariant/2', 'gid://shopify/ProductVariant/3']) {
+            return false;
+        }
+        foreach ($variants as $v) {
+            $mf = $v['metafields'][0] ?? [];
+            if (($mf['namespace'] ?? null) !== 'partna'
+                || ($mf['key'] ?? null) !== 'enabled'
+                || ($mf['type'] ?? null) !== 'boolean'
+                || ($mf['value'] ?? null) !== 'false') {
+                return false;
+            }
+        }
+
+        return true;
+    });
+});
+
+it('skips the bulk mutation entirely when no variant state changed', function () {
+    // A no-op save (e.g. the user toggled a variant then toggled it back
+    // before saving) must not hit Shopify at all beyond the fetch.
+    seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
+
+    Http::fake([
+        "https://{$this->shopDomain}/admin/api/*" => Http::sequence()
+            ->push([
+                'data' => [
+                    'product' => [
+                        'variants' => [
+                            'edges' => [
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/1', 'title' => 'S', 'enabled' => ['value' => 'true']]],
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/2', 'title' => 'M', 'enabled' => ['value' => 'false']]],
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200),
+    ]);
+
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
+        'product_gid' => $this->productGid,
+        'field' => 'disabled_variant_gids',
+        // Matches current state exactly: variant 2 already disabled.
+        'value' => ['gid://shopify/ProductVariant/2'],
+    ]);
+    $response = $this->controller->update($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    // Only the fetch — no write needed.
+    Http::assertSentCount(1);
+});
+
+it('returns 422 when the bulk variant mutation surfaces userErrors', function () {
+    seedEmbeddedShopifyIntegration($this->brandId, $this->shopDomain);
+
+    Http::fake([
+        "https://{$this->shopDomain}/admin/api/*" => Http::sequence()
+            ->push([
+                'data' => [
+                    'product' => [
+                        'variants' => [
+                            'edges' => [
+                                ['node' => ['id' => 'gid://shopify/ProductVariant/1', 'title' => 'S', 'enabled' => ['value' => 'true']]],
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200)
+            ->push([
+                'data' => [
+                    'productVariantsBulkUpdate' => [
+                        'productVariants' => null,
+                        'userErrors' => [['field' => ['variants', '0', 'metafields'], 'message' => 'Invalid metafield value']],
+                    ],
+                ],
+            ], 200),
+    ]);
+
+    $request = makeProductSettingsUpdateRequest($this->brandId, [
+        'product_gid' => $this->productGid,
+        'field' => 'disabled_variant_gids',
+        'value' => ['gid://shopify/ProductVariant/1'],
+    ]);
+    $response = $this->controller->update($request);
+
+    expect($response->getStatusCode())->toBe(422);
+    expect(json_decode($response->getContent(), true)['message'])->toBe('Invalid metafield value');
 });
 
 it('returns 422 on an unknown field', function () {
