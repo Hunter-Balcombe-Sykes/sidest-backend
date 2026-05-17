@@ -246,7 +246,19 @@ class BrandStatusService
             return false;
         }
 
-        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
+        $publicDomain = (string) config('partna.public_domain', 'partna.au');
+        $url = 'https://'.$subdomain.'.'.$publicDomain;
+
+        // SEC-5: defence-in-depth host-suffix guard. Same threat model as the
+        // matching block in EmbeddedSetupController::checkStorefrontStatus —
+        // refuse any URL whose resolved host is not a subdomain of the
+        // configured public domain, before Guzzle dials it. Runs ahead of the
+        // cache so a poisoned subdomain can never persist a `true` reading.
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! is_string($host) || ! str_ends_with(strtolower($host), '.'.strtolower($publicDomain))) {
+            return false;
+        }
+
         $cacheKey = 'brand_status:storefront_reachable:'.sha1($url);
 
         $cached = Cache::get($cacheKey);

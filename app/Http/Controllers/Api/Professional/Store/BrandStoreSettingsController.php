@@ -328,7 +328,17 @@ class BrandStoreSettingsController extends ApiController
      */
     private function checkStorefrontStatus(string $subdomain): string
     {
-        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
+        $publicDomain = (string) config('partna.public_domain', 'partna.au');
+        $url = 'https://'.$subdomain.'.'.$publicDomain;
+
+        // SEC-5: defence-in-depth host-suffix guard. See the matching block in
+        // EmbeddedSetupController::checkStorefrontStatus for the threat model;
+        // both call sites construct the URL the same way and need the same
+        // refusal contract.
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! is_string($host) || ! str_ends_with(strtolower($host), '.'.strtolower($publicDomain))) {
+            return 'unreachable';
+        }
 
         try {
             $response = Http::withOptions([

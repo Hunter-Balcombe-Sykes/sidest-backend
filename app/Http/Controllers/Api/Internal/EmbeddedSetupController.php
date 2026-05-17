@@ -908,7 +908,19 @@ class EmbeddedSetupController extends ApiController
      */
     private function checkStorefrontStatus(string $subdomain): string
     {
-        $url = 'https://'.$subdomain.'.'.config('partna.public_domain', 'partna.au');
+        $publicDomain = (string) config('partna.public_domain', 'partna.au');
+        $url = 'https://'.$subdomain.'.'.$publicDomain;
+
+        // SEC-5: defence-in-depth host-suffix guard. The subdomain is sourced
+        // from BrandStoreSettings / BrandProfile (DB), not request input — so an
+        // exploit requires DB write access. But the cost of refusing any
+        // resolved host outside .{public_domain} is zero, and it permanently
+        // closes the SSRF gadget (e.g. `evil.com#` smuggling the host past
+        // string concatenation into 169.254.169.254 / cloud metadata).
+        $host = parse_url($url, PHP_URL_HOST);
+        if (! is_string($host) || ! str_ends_with(strtolower($host), '.'.strtolower($publicDomain))) {
+            return 'unreachable';
+        }
 
         try {
             $response = Http::withOptions([
