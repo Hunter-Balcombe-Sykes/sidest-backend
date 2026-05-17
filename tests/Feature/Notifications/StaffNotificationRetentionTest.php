@@ -79,7 +79,7 @@ it('uses the default retention window when ends_at is not provided', function ()
         'invite' => 999,
     ]);
 
-    $controller = new StaffNotificationController;
+    $controller = app(StaffNotificationController::class);
 
     $request = Request::create('/staff/notifications', 'POST', [
         'type' => 'info',
@@ -102,7 +102,7 @@ it('uses the default retention window when ends_at is not provided', function ()
 it('honours an explicit ends_at on the request', function () {
     Config::set('partna.notification_retention_days.default', 30);
 
-    $controller = new StaffNotificationController;
+    $controller = app(StaffNotificationController::class);
 
     $explicit = '2026-05-01 09:30:00';
 

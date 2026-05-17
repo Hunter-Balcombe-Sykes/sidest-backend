@@ -13,7 +13,7 @@
 ## Progress
 
 - P0: 2 of 5 complete (#SHOP-1, #GDPR-1)
-- P1: 6 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2, #ANALYTICS-1, #CATALOG-1, #CATALOG-2)
+- P1: 8 of 13 complete (#SQUARE-1, #FRESHA-1, #SHOP-2, #ANALYTICS-1, #CATALOG-1, #CATALOG-2, #NOTIF-1, #INVITE-1)
 - P2: 5 of 13 complete (#BRAND-SETUP-1, #COLLECTION-1, #GBP-1, #BOOK-1, #STRIPE-PM-1)
 - P3: 0 of 6 complete (defer-by-default per agent memory; build only when a real ticket lands)
 
@@ -67,7 +67,7 @@ Each bundle shares a file pattern, an existing service, or a domain — bundling
 
 - [x] **B4 — Catalog admin overrides.** #CATALOG-2 (3 endpoints: commission, discount, active). ~2–3h. Same pattern across three product-field PATCH endpoints. Pre-req: #CATALOG-1 (the read-only inspector) so the admin can see what they're editing. One Pest sweep that toggles each field and asserts it round-trips through the brand's own dashboard. Shipped 2026-05-17.
 
-- [ ] **B5 — Notification + invite admin extensions.** #NOTIF-1, #INVITE-1. ~3–5h. Both extend an existing staff controller (`StaffNotificationController` / `StaffInviteController`) with the missing write methods that already exist on the self-service side. Shared mental model: "what can a brand do that staff can't yet?" One PR, two reviewer-friendly diffs.
+- [x] **B5 — Notification + invite admin extensions.** #NOTIF-1, #INVITE-1. ~3–5h. Both extend an existing staff controller (`StaffNotificationController` / `StaffInviteController`) with the missing write methods that already exist on the self-service side. Shared mental model: "what can a brand do that staff can't yet?" One PR, two reviewer-friendly diffs.
 
 - [ ] **B6 — Tiny admin parity writes.** #STORE-1, #BRAND-INVITE-PROMOTE-1, #BULK-1, #AFF-PHOTO-1, #NOTES-1. ~3–5h. Each is ≤1h but they share the "extend an existing controller / add one column" shape. Bundling avoids 5 micro-PRs.
 
@@ -342,7 +342,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::get('/brand/catalog/debug', [BrandCatalogController::class, 'debug']);
         ```
 
-- [ ] **#INVITE-1** · P1 — Full brand-affiliate invite admin (single, bulk, CSV, resend)
+- [x] **#INVITE-1** · P1 — Full brand-affiliate invite admin (single, bulk, CSV, resend)
     - **Where:** extend `app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffInviteController.php`; mirror `app/Http/Controllers/Api/Professional/BrandAffiliateInviteController.php`.
     - **Affects:** Brands stuck on CSV import / 200-affiliate launches.
     - **Effort:** M (~3–4h)
@@ -369,7 +369,7 @@ These are best in their own session because bundling would force unrelated archi
         });
         ```
 
-- [ ] **#NOTIF-1** · P1 — Per-pro notification list / mark-read / dismiss
+- [x] **#NOTIF-1** · P1 — Per-pro notification list / mark-read / dismiss
     - **Where:** extend `app/Http/Controllers/Api/Staff/StaffSite/StaffNotificationController.php`; mirror reads/writes from `app/Http/Controllers/Api/Professional/Notifications/NotificationController.php`.
     - **Affects:** Stuck banners on a brand's dashboard support can't clear.
     - **Effort:** S (~1–2h)

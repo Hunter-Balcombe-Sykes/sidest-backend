@@ -130,6 +130,10 @@ Route::prefix('staff')
         // View invites for a brand
         Route::get('/professionals/{professional}/invites', [StaffInviteController::class, 'index']);
 
+        // View a pro's in-app notifications (read-only mirror of /me/notifications)
+        // so support can see exactly which banners the brand is staring at.
+        Route::get('/professionals/{professional}/notifications', [StaffNotificationController::class, 'indexForProfessional']);
+
         // View account deletion state + audit log for support context.
         // withTrashed: support may need to view erasure history of an account
         // that has already been soft-deleted by a regular staff destroy.
@@ -285,6 +289,18 @@ Route::prefix('staff')
         // Notifications
         Route::post('/notifications', [StaffNotificationController::class, 'store']);
 
+        // Clear stuck banners on a brand's dashboard — staff-on-behalf-of writes
+        // to the same notification_receipts table the self-service endpoints use.
+        // withoutScopedBindings(): Notification.professional_id is nullable
+        // (global broadcasts), so we can't resolve {notification} as a child of
+        // {professional}. The controller asserts visibility manually.
+        Route::withoutScopedBindings()->group(function (): void {
+            Route::post('/professionals/{professional}/notifications/{notification}/read', [StaffNotificationController::class, 'markReadForProfessional'])
+                ->whereUuid('notification');
+            Route::post('/professionals/{professional}/notifications/{notification}/dismiss', [StaffNotificationController::class, 'dismissForProfessional'])
+                ->whereUuid('notification');
+        });
+
         // Notification email policies
         Route::get('/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'indexGlobal']);
         Route::patch('/notification-email-policies', [StaffNotificationEmailPolicyController::class, 'updateGlobal']);
@@ -303,6 +319,17 @@ Route::prefix('staff')
 
         // Expire a stuck invite (admin only)
         Route::delete('/professionals/{professional}/invites/{invite}', [StaffInviteController::class, 'cancel'])
+            ->whereUuid('invite');
+
+        // Send invites on a brand's behalf (INVITE-1) — for support rescuing a
+        // brand stuck on CSV import or a 200-affiliate launch. Brand-only +
+        // funding-gated inline in the controller (the JWT is staff here, so the
+        // `brand.only` and `brand-funding-gate` middlewares used self-service
+        // would short-circuit as no-ops).
+        Route::post('/professionals/{professional}/invites', [StaffInviteController::class, 'store']);
+        Route::post('/professionals/{professional}/invites/bulk', [StaffInviteController::class, 'bulk']);
+        Route::post('/professionals/{professional}/invites/import-csv', [StaffInviteController::class, 'importCsv']);
+        Route::post('/professionals/{professional}/invites/{invite}/resend', [StaffInviteController::class, 'resend'])
             ->whereUuid('invite');
 
         // Edit brand profile (admin only)

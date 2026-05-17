@@ -330,6 +330,44 @@ class BrandAffiliateInviteService
         });
     }
 
+    /**
+     * Re-publish a pending/expired invite: refreshes the expiry to the default
+     * window and re-fires the dashboard notification banner for any
+     * matching-email professional already on the platform. Used by the
+     * staff "resend" endpoint (INVITE-1) and any future brand-side resend UI.
+     *
+     * Throws if the invite is generic (no email) or already accepted.
+     */
+    public function resendInvite(BrandAffiliateInvite $invite): BrandAffiliateInvite
+    {
+        if ($invite->status === 'accepted') {
+            throw new RuntimeException('This invite has already been accepted.');
+        }
+
+        $email = is_string($invite->email) ? trim($invite->email) : '';
+        if ($email === '') {
+            throw new RuntimeException('Cannot resend a generic invite — it has no recipient email.');
+        }
+
+        $brand = $invite->brandProfessional;
+        if (! $brand instanceof Professional) {
+            $brand = Professional::query()->findOrFail($invite->brand_professional_id);
+        }
+
+        // Funnel through createOrRefreshInvite so the same record is refreshed
+        // (matched by email_lc) and the notification batch is re-fired. Reusing
+        // the upsert path means a single source of truth for expiry resets.
+        $result = $this->createOrRefreshInvite($brand, [
+            'email' => $invite->email,
+            'first_name' => $invite->first_name,
+            'last_name' => $invite->last_name,
+            'message' => $invite->message,
+            'expiration' => '30d',
+        ]);
+
+        return $result['invite'];
+    }
+
     public function declineInvite(BrandAffiliateInvite $invite, Professional $professional): BrandAffiliateInvite
     {
         return DB::transaction(function () use ($invite, $professional): BrandAffiliateInvite {
