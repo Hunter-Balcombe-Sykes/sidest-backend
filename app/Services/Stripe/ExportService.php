@@ -73,8 +73,11 @@ class ExportService
             'net_to_affiliate_cents', 'currency', 'brand', 'affiliate', 'stripe_pi_id',
         ];
 
+        // Use lazy() (not cursor()) so the eager-load with([...]) clause on $query is honoured.
+        // cursor() is a PDO row streamer and silently discards with(); lazy() chunks via get()
+        // per page, preserves orderBy(), and runs the standard whereIn eager-load pass.
         $generator = function () use ($query) {
-            foreach ($query->cursor() as $p) {
+            foreach ($query->lazy() as $p) {
                 yield [
                     $p->created_at?->toDateString() ?? '',
                     $p->status,
@@ -117,6 +120,9 @@ class ExportService
                 return;
             }
 
+            // lazy() (not cursor()) — cursor() silently drops with(), turning each order row
+            // into 3 extra SELECTs. lazy() chunks via get() so the eager-load pass runs once
+            // per chunk and orderBy('occurred_at') is preserved.
             $orders = Order::query()
                 ->with([
                     'payout:id,status,gross_commission_cents,platform_fee_cents,net_payout_cents,ledger_entry_count,payment_intent_id,charge_id,created_at',
@@ -125,7 +131,7 @@ class ExportService
                 ])
                 ->whereIn('payout_id', $payoutIds)
                 ->orderBy('occurred_at')
-                ->cursor();
+                ->lazy();
 
             foreach ($orders as $o) {
                 $grossCommission = (int) ($o->commission_cents ?? 0);

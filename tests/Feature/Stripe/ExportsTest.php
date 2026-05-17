@@ -221,6 +221,63 @@ it('export rejects invalid type', function () {
     expect($response->status())->toBe(422);
 });
 
+// Regression: cursor() silently drops with([...]), turning every relation access into
+// a separate SELECT. ExportService uses lazy() instead; these tests pin the query count so
+// a future "optimisation" that re-introduces cursor() trips the assertion. Broken behaviour
+// at this seed size produces 30+ queries; fixed behaviour stays well under 15.
+it('detailed-commissions export eager-loads relations (no N+1)', function () {
+    $brand = exp_seedPro('exp-brand-nplus1', 'brand', 'expbrandnplus1', 'BrandNPlus');
+    $aff = exp_seedPro('exp-aff-nplus1', 'influencer', 'expaffnplus1', 'AffNPlus');
+    exp_seedPayout('pay-nplus1', $brand->id, $aff->id);
+    for ($i = 1; $i <= 10; $i++) {
+        exp_seedOrder('ord-n'.$i, $brand->id, $aff->id, 'pay-nplus1');
+    }
+
+    DB::connection('pgsql')->enableQueryLog();
+
+    $response = exp_makeController()->export(
+        exp_makeRequest($brand, ['role' => 'brand']),
+        'detailed-commissions',
+        'csv',
+    );
+    ob_start();
+    $response->sendContent();
+    ob_end_clean();
+
+    $count = count(DB::connection('pgsql')->getQueryLog());
+    DB::connection('pgsql')->disableQueryLog();
+
+    // Eager-loaded path: ~1 payouts pluck + 1 orders + 3 whereIn relation loads ≈ 5–6 queries.
+    // Broken (cursor) path: 30+ queries for 10 orders. 15 is the safe ceiling.
+    expect($count)->toBeLessThan(15);
+});
+
+it('payouts export eager-loads relations (no N+1)', function () {
+    $brand = exp_seedPro('exp-brand-pn', 'brand', 'expbrandpn', 'BrandPN');
+    $aff = exp_seedPro('exp-aff-pn', 'influencer', 'expaffpn', 'AffPN');
+    for ($i = 1; $i <= 5; $i++) {
+        exp_seedPayout('pay-pn'.$i, $brand->id, $aff->id);
+    }
+
+    DB::connection('pgsql')->enableQueryLog();
+
+    $response = exp_makeController()->export(
+        exp_makeRequest($brand, ['role' => 'brand']),
+        'payouts',
+        'csv',
+    );
+    ob_start();
+    $response->sendContent();
+    ob_end_clean();
+
+    $count = count(DB::connection('pgsql')->getQueryLog());
+    DB::connection('pgsql')->disableQueryLog();
+
+    // Eager-loaded path: 1 payouts + 2 whereIn relation loads ≈ 3 queries.
+    // Broken (cursor) path: 1 + 5×2 = 11 queries. 8 is the safe ceiling.
+    expect($count)->toBeLessThan(8);
+});
+
 it('xlsx export returns binary content with the correct content-type', function () {
     $brand = exp_seedPro('exp-brand-x2', 'brand', 'expbrandx2', 'XlsxBrand');
     $aff = exp_seedPro('exp-aff-x2', 'influencer', 'expaffx2', 'XlsxAff');
