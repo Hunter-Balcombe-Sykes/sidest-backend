@@ -17,6 +17,7 @@ use App\Models\Analytics\SiteVisit;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\AnalyticsCacheService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -72,7 +73,7 @@ class AnalyticsController extends ApiController
         $visit->save();
 
         try {
-            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+            $this->debounceInvalidateAnalytics($site->professional_id);
         } catch (Throwable $e) {
             report($e);
             Log::warning('Analytics cache invalidation failed on pageview', ['site_id' => $site->id, 'error' => $e->getMessage()]);
@@ -184,7 +185,7 @@ class AnalyticsController extends ApiController
         }
 
         try {
-            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+            $this->debounceInvalidateAnalytics($site->professional_id);
         } catch (Throwable $e) {
             report($e);
             Log::warning('Analytics cache invalidation failed on click', ['site_id' => $site->id, 'error' => $e->getMessage()]);
@@ -227,7 +228,7 @@ class AnalyticsController extends ApiController
         $event->save();
 
         try {
-            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+            $this->debounceInvalidateAnalytics($site->professional_id);
         } catch (Throwable $e) {
             report($e);
             Log::warning('Analytics cache invalidation failed on cart event', ['site_id' => $site->id, 'error' => $e->getMessage()]);
@@ -312,7 +313,7 @@ class AnalyticsController extends ApiController
         }
 
         try {
-            $this->analyticsCache->invalidateAnalytics($site->professional_id);
+            $this->debounceInvalidateAnalytics($site->professional_id);
         } catch (Throwable $e) {
             report($e);
             Log::warning('Analytics cache invalidation failed on section view', [
@@ -326,5 +327,17 @@ class AnalyticsController extends ApiController
             'message' => 'Section view recorded',
             'view_id' => $view->id,
         ], 201);
+    }
+
+    /**
+     * Invalidate analytics cache at most once per 30-second window per professional.
+     * High-volume ingest (pageviews, clicks, section views) would otherwise bust SWR
+     * on every event. Commerce writes bypass this and call invalidateAnalytics() directly.
+     */
+    private function debounceInvalidateAnalytics(string $professionalId): void
+    {
+        if (Cache::add("analytics:ingest-debounce:{$professionalId}", 1, 30)) {
+            $this->analyticsCache->invalidateAnalytics($professionalId);
+        }
     }
 }
