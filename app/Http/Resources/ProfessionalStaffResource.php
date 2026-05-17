@@ -35,6 +35,8 @@ class ProfessionalStaffResource extends JsonResource
             'location_postcode' => $this->location_postcode,
             'location_country' => $this->location_country,
             'stripe_connect_status' => $this->stripe_connect_status,
+            // Staff-only tribal knowledge — must NEVER appear in ProfessionalResource (/me).
+            'admin_notes' => $this->admin_notes,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             // Signals to staff UI that this professional is soft-deleted (deleted_at is set);

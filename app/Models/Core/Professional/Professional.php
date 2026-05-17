@@ -102,6 +102,10 @@ class Professional extends BaseModel
         'deletion_requested_at',
         'deletion_confirmed_at',
         'deletion_previous_status',
+
+        // Staff-only — surfaced through ProfessionalStaffResource. Never expose through
+        // ProfessionalResource (self-service /me).
+        'admin_notes',
     ];
 
     protected $casts = [

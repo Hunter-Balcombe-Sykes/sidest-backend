@@ -1,0 +1,152 @@
+<?php
+
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffProfessionalController;
+use App\Models\Core\Professional\Professional;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+beforeEach(function () {
+    $conn = DB::connection('pgsql');
+    try {
+        $conn->statement("ATTACH DATABASE ':memory:' AS core");
+    } catch (\Throwable) {
+    }
+
+    $conn->statement('CREATE TABLE IF NOT EXISTS core.professionals (
+        id TEXT PRIMARY KEY,
+        handle TEXT,
+        display_name TEXT,
+        professional_type TEXT,
+        status TEXT,
+        admin_notes TEXT,
+        about TEXT,
+        deleted_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )');
+});
+
+function seedProfessionals(int $n, string $status = 'active'): array
+{
+    $ids = [];
+    for ($i = 0; $i < $n; $i++) {
+        $id = (string) Str::uuid();
+        DB::table('core.professionals')->insert([
+            'id' => $id,
+            'handle' => "bulk-{$i}",
+            'display_name' => "Bulk Pro {$i}",
+            'professional_type' => 'brand',
+            'status' => $status,
+        ]);
+        $ids[] = $id;
+    }
+
+    return $ids;
+}
+
+it('bulk-suspends a wave of professionals', function () {
+    $ids = seedProfessionals(5);
+
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => $ids,
+        'status' => 'suspended',
+    ]);
+
+    Log::spy();
+    $response = $controller->bulkUpdateStatus($request);
+    $data = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(200)
+        ->and($data['updated_count'])->toBe(5)
+        ->and($data['status'])->toBe('suspended')
+        ->and($data['missing_ids'])->toBe([]);
+
+    // Every row should now be suspended
+    expect(Professional::query()->whereIn('id', $ids)->where('status', 'suspended')->count())->toBe(5);
+
+    // One audit log per professional
+    Log::shouldHaveReceived('info')->times(5);
+});
+
+it('accepts exactly 100 IDs', function () {
+    $ids = seedProfessionals(100);
+
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => $ids,
+        'status' => 'suspended',
+    ]);
+
+    $response = $controller->bulkUpdateStatus($request);
+    $data = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(200)
+        ->and($data['updated_count'])->toBe(100);
+});
+
+it('rejects 101 IDs with validation error', function () {
+    $ids = array_map(fn () => (string) Str::uuid(), range(1, 101));
+
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => $ids,
+        'status' => 'suspended',
+    ]);
+
+    expect(fn () => $controller->bulkUpdateStatus($request))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
+it('rejects unknown status values', function () {
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => [(string) Str::uuid()],
+        'status' => 'banned',
+    ]);
+
+    expect(fn () => $controller->bulkUpdateStatus($request))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
+it('rejects non-UUID IDs', function () {
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => ['not-a-uuid'],
+        'status' => 'suspended',
+    ]);
+
+    expect(fn () => $controller->bulkUpdateStatus($request))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
+it('returns missing_ids for unknown UUIDs without rolling back valid ones', function () {
+    $valid = seedProfessionals(2);
+    $missing = [(string) Str::uuid(), (string) Str::uuid()];
+
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => array_merge($valid, $missing),
+        'status' => 'suspended',
+    ]);
+
+    $response = $controller->bulkUpdateStatus($request);
+    $data = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(200)
+        ->and($data['updated_count'])->toBe(2)
+        ->and(count($data['missing_ids']))->toBe(2);
+});
+
+it('rejects empty ids array', function () {
+    $controller = new StaffProfessionalController;
+    $request = Request::create('/', 'POST', [
+        'ids' => [],
+        'status' => 'suspended',
+    ]);
+
+    expect(fn () => $controller->bulkUpdateStatus($request))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});

@@ -211,6 +211,12 @@ Route::prefix('staff')
         // #AFF-SEL-1 (read part) — affiliate selections inspector. The reset-to-defaults
         // POST is an admin write and is intentionally not included in B2.
         Route::get('/professionals/{professional}/affiliate/selections', [StaffAffiliateSelectionController::class, 'index']);
+
+        // B6 #AFF-PHOTO-1 (read part) — inspect affiliate custom product photos (any-staff).
+        // Admin-only delete lives in the admin group below.
+        Route::get('/professionals/{professional}/affiliate/products/{gid}/photos',
+            [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliatePhotoController::class, 'index'])
+            ->where('gid', 'gid://shopify/Product/[0-9]+');
     });
 
 // Authorised Staff Admin Editing
@@ -225,6 +231,11 @@ Route::prefix('staff')
         Route::patch('/professionals/{professional}', [StaffProfessionalController::class, 'update']);
         // Hard delete (admin only)
         Route::delete('/professionals/{professional}/force', [StaffProfessionalController::class, 'forceDestroy']);
+
+        // Bulk suspend/reactivate a wave of professionals (compliance sweep, admin only).
+        // Cap 100 IDs is enforced by form rules; 5/min throttle here is the rate limit.
+        Route::middleware('throttle:5,1')
+            ->post('/professionals/bulk-status', [StaffProfessionalController::class, 'bulkUpdateStatus']);
 
         // Admin edit/delete customers for a professional
         Route::patch('/professionals/{professional}/customers/{customer}', [StaffCustomerManagementController::class, 'update'])
@@ -386,6 +397,16 @@ Route::prefix('staff')
             ->middleware('throttle:brand-catalog-writes')
             ->where('productGid', '.*');
 
+        // B6 #STORE-1 — push the staff-edited commission rate to the brand's Shopify metafield (admin only).
+        // Self-service PATCH skips Shopify sync deliberately; this is the opt-in to push.
+        Route::post('/professionals/{professional}/store-settings/deploy', [StaffStoreSettingsController::class, 'deploy']);
+
+        // B6 #AFF-PHOTO-1 — DMCA / inappropriate content takedown on an affiliate's custom product photo (admin only).
+        Route::delete('/professionals/{professional}/affiliate/products/{gid}/photos/{media}',
+            [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliatePhotoController::class, 'destroy'])
+            ->where('gid', 'gid://shopify/Product/[0-9]+')
+            ->whereUuid('media');
+
         // GDPR-triggered erasure: support invokes the same lifecycle as self-service
         // but skips the email-token step. Reason field is mandatory.
         // withTrashed: an already-soft-deleted account can still be the subject
@@ -394,6 +415,16 @@ Route::prefix('staff')
             ->withTrashed();
         Route::post('/professionals/{professional}/deletion/cancel', [StaffAccountDeletionController::class, 'cancel'])
             ->withTrashed();
+
+        // Promote an additional brand-partner connection to primary on behalf of an
+        // affiliate (admin only). Mirrors self-service BrandPartnerController::promote.
+        // withoutScopedBindings(): {affiliate} and {brand} are independent Professional
+        // models — not parent/child.
+        Route::middleware('throttle:30,1')->withoutScopedBindings()->group(function (): void {
+            Route::post('/professionals/{affiliate}/brand-partners/{brand}/promote',
+                [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandPartnerController::class, 'promote'])
+                ->whereUuid(['affiliate', 'brand']);
+        });
 
         // Manually create or remove brand-affiliate links (admin only).
         // withoutScopedBindings(): {brand} and {affiliate} are two independent

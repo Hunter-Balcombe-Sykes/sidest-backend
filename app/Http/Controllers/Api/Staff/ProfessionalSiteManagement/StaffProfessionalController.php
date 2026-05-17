@@ -14,6 +14,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 // V2: Staff browses, searches, and manages professionals (status updates, archive, restore, hard delete). Primary staff dashboard entry point.
 class StaffProfessionalController extends ApiController
@@ -139,6 +140,59 @@ class StaffProfessionalController extends ApiController
 
         return $this->success([
             'professional' => new ProfessionalStaffResource($professional->fresh()),
+        ]);
+    }
+
+    /**
+     * POST /api/staff/professionals/bulk-status
+     * Body: { "ids": uuid[], "status": "active"|"suspended" }
+     *
+     * Compliance sweep — suspend or reactivate a wave of accounts in one request.
+     * Capped at 100 IDs per request; throttled at the route layer (5/min).
+     * Returns a per-row outcome map so partial misses (deleted accounts, unknown IDs)
+     * surface to the caller without rolling back the whole batch.
+     */
+    public function bulkUpdateStatus(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:100'],
+            'ids.*' => ['required', 'uuid', 'distinct'],
+            'status' => ['required', 'string', 'in:active,suspended'],
+        ]);
+
+        $ids = array_values(array_unique($data['ids']));
+        $status = $data['status'];
+
+        $updated = [];
+        $missing = [];
+
+        DB::transaction(function () use ($ids, $status, &$updated, &$missing): void {
+            $existing = Professional::query()->whereIn('id', $ids)->get(['id'])->pluck('id')->all();
+            $missing = array_values(array_diff($ids, $existing));
+
+            if (! empty($existing)) {
+                Professional::query()
+                    ->whereIn('id', $existing)
+                    ->update(['status' => $status]);
+                $updated = $existing;
+            }
+        });
+
+        // Audit log per professional (placeholder for #OPS-2 audit log). One entry per row
+        // so a fraud sweep that suspended 80 accounts produces 80 traceable records.
+        foreach ($updated as $id) {
+            Log::info('staff-bulk-status: professional status changed', [
+                'action' => 'staff-bulk-status',
+                'professional_id' => $id,
+                'new_status' => $status,
+            ]);
+        }
+
+        return $this->success([
+            'updated_count' => count($updated),
+            'updated_ids' => $updated,
+            'missing_ids' => $missing,
+            'status' => $status,
         ]);
     }
 

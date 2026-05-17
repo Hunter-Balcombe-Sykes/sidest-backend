@@ -45,9 +45,9 @@ class StaffUpdateProfessionalRequest extends BaseFormRequest
             'location_postcode' => ['sometimes', 'nullable', 'string', 'max:255'],
             'location_country' => ['sometimes', 'nullable', 'string', 'max:255'],
 
-            // optional staff-only flags (ONLY keep these if your DB/model actually has them)
-            // 'is_suspended' => ['sometimes', 'boolean'],
-            // 'admin_notes'  => ['sometimes', 'nullable', 'string', 'max:5000'],
+            // Staff-only — see ProfessionalStaffResource. Self-service ProfessionalResource
+            // must never expose admin_notes back to the brand.
+            'admin_notes' => ['sometimes', 'nullable', 'string', 'max:5000'],
         ], $this->aboutRules());
     }
 
