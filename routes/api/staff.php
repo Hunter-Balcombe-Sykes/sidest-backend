@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliateStatusController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandProfileController;
+use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionAdjustmentController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionPayoutController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffCommissionVoidController;
@@ -342,6 +343,11 @@ Route::prefix('staff')
         // Manually void a pending commission entry (admin only)
         Route::post('/commissions/{commission}/void', [StaffCommissionVoidController::class, 'void'])
             ->whereUuid('commission');
+
+        // LEDGER-1 — post a manual commission adjustment row (admin only). Idempotent
+        // on the caller-supplied {reference}. Touches commerce.commission_movements
+        // directly, so the audit trail (reason + actor) is baked into calculation_metadata.
+        Route::post('/commissions/adjust', [StaffCommissionAdjustmentController::class, 'store']);
 
         // Trigger Shopify resync for a brand (admin only)
         Route::post('/professionals/{professional}/integrations/shopify/resync', [StaffShopifyResyncController::class, 'invoke']);

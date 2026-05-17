@@ -223,7 +223,7 @@ These are best in their own session because bundling would force unrelated archi
         Route::get('/brand/commerce-analytics', [BrandCommerceAnalyticsController::class, 'overview']);
         ```
 
-- [ ] **#LEDGER-1** · P1 — Manual commission adjustment entry (admin)
+- [x] **#LEDGER-1** · P1 — Manual commission adjustment entry (admin)
     - **Where:** new `app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffCommissionAdjustmentController.php`; new action `app/Actions/Commerce/PostCommissionAdjustmentAction.php`.
     - **Affects:** Support's ability to credit/debit a professional for a mis-attributed order. Today this requires engineering + raw SQL.
     - **Effort:** M (~3–4h)
