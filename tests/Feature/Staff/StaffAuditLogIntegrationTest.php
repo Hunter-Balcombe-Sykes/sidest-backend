@@ -39,6 +39,7 @@ beforeEach(function () {
 /**
  * Stub VerifySupabaseJwt so the test HTTP client doesn't need a real JWT.
  * Sets supabase_uid so EnsurePartnaStaff can do its real DB lookup.
+ * Sets supabase_aal to 'aal2' so require.aal2 middleware passes.
  */
 function actingAsStaffWithUid(string $supabaseUid): \Pest\Support\HigherOrderTapProxy
 {
@@ -55,6 +56,7 @@ function actingAsStaffWithUid(string $supabaseUid): \Pest\Support\HigherOrderTap
                     'email' => 'staff-test@partna.au',
                     'email_verified' => true,
                 ]);
+                $request->attributes->set('supabase_aal', 'aal2');
 
                 return $next($request);
             }

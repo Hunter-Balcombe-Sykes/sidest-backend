@@ -130,6 +130,17 @@ class VerifySupabaseJwt
 
         if ($claims !== null) {
             $request->attributes->set('supabase_claims', $claims);
+            // Hot-accessed claims promoted to top-level attributes so policies
+            // and middleware don't reparse $claims on every check.
+            $request->attributes->set('supabase_aal', $claims['aal'] ?? 'aal1');
+            $request->attributes->set('supabase_amr', $claims['amr'] ?? []);
+            $request->attributes->set('supabase_session_id', $claims['session_id'] ?? null);
+        } else {
+            // Auth-Server fallback path: no claims available. Default to aal1
+            // so downstream policies fail safe (treat as not-MFA-verified).
+            $request->attributes->set('supabase_aal', 'aal1');
+            $request->attributes->set('supabase_amr', []);
+            $request->attributes->set('supabase_session_id', null);
         }
 
         // Nightwatch falls back to hidden context when no Laravel auth guard is resolved.

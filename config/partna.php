@@ -1120,6 +1120,39 @@ return [
     |   product_custom_photos      Per-affiliate custom product photo flags; hot reads on
     |                              every order item, short TTL to limit stale-state window.
     */
+    /*
+    |----------------------------------------------------------------------
+    | MFA — verification windows and brute-force protection
+    |----------------------------------------------------------------------
+    */
+    'mfa' => [
+        /*
+        | Default "fresh MFA" window in seconds — how long after a successful
+        | TOTP/WebAuthn verify a request still counts as freshly-verified.
+        | Used by BasePolicy::requiresFreshAal2() unless an explicit override
+        | is passed (e.g. unenroll uses a tighter 60s window).
+        */
+        'fresh_window_seconds' => (int) env('SIDEST_MFA_FRESH_WINDOW_SECONDS', 300),
+
+        /*
+        | Tighter window specifically for the "remove my own MFA factor"
+        | flow. The user is about to disable their own protection; force a
+        | re-verification within the last minute with the factor they're
+        | about to remove.
+        */
+        'unenroll_fresh_window_seconds' => (int) env('SIDEST_MFA_UNENROLL_WINDOW_SECONDS', 60),
+
+        /*
+        | Brute-force protection: maximum failed verifies (per user+factor)
+        | within the rolling window. On the (N+1)-th attempt, the MFA
+        | Verification Hook returns {decision: reject} for the duration of
+        | the window. This is enforced BEFORE Supabase accepts the verify,
+        | so the session never reaches aal2 from a brute-force attempt.
+        */
+        'verify_max_failures'  => (int) env('SIDEST_MFA_VERIFY_MAX_FAILURES', 5),
+        'verify_failure_window_seconds' => (int) env('SIDEST_MFA_VERIFY_WINDOW_SECONDS', 300),
+    ],
+
     'cache' => [
         'ttls' => [
             'public_payload' => (int) env('PARTNA_CACHE_TTL_PUBLIC_PAYLOAD', env('CACHE_TTL_PUBLIC_PAYLOAD', 900)),                                 // 15m
