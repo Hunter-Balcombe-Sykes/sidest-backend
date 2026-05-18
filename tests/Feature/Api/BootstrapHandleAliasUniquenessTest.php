@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Requests\Api\BootstrapRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -78,6 +79,13 @@ function validateBootstrapRequest(array $data, string $uid = ''): ?array
         return null; // validation passed
     } catch (ValidationException $e) {
         return $e->errors();
+    } catch (HttpResponseException $e) {
+        // BootstrapRequest::failedValidation() short-circuits the invite-only
+        // branch into a structured HttpResponseException so the API returns a
+        // 'error: invite_required' code. Unwrap the JSON for the test helper.
+        $payload = json_decode((string) $e->getResponse()->getContent(), true) ?: [];
+
+        return $payload['errors'] ?? [];
     }
 }
 
@@ -94,6 +102,9 @@ function validBootstrapPayload(array $overrides = []): array
         'phone' => '0400000000',
         'first_name' => 'Test',
         'professional_type' => 'professional',
+        // Satisfies the invite-only signup rule. Non-existent handle is harmless
+        // — BootstrapController silently skips when no matching brand exists.
+        'join_brand_handle' => 'no-such-brand-for-test',
     ], $overrides);
 }
 
@@ -131,5 +142,79 @@ it('accepts a handle that exists neither in professionals nor in aliases', funct
     $errors = validateBootstrapRequest(validBootstrapPayload(['handle' => 'freshhandle']));
 
     // Validation should pass outright — no errors at all.
+    expect($errors)->toBeNull();
+});
+
+// ── Invite-only signup enforcement ────────────────────────────────────────────
+// A new non-brand professional must arrive with one of invite_token /
+// brand_partner_professional_id / join_brand_handle. Otherwise the bootstrap
+// would create an orphaned affiliate with no brand link, no KV entry, and
+// no site.settings.brand_partner (this is exactly how the 'hjjh' bad state
+// happened in dev — see PR #66/67 and the inline comment in BootstrapRequest).
+
+it('rejects new affiliate signup with no invite/brand context', function () {
+    $errors = validateBootstrapRequest(array_merge(validBootstrapPayload([
+        'handle' => 'inviteless',
+    ]), ['join_brand_handle' => null]));
+
+    expect($errors)->not->toBeNull();
+    expect($errors)->toHaveKey('join_brand_handle');
+    expect($errors['join_brand_handle'][0] ?? '')->toContain('invitation');
+});
+
+it('rejects new influencer signup with no invite/brand context', function () {
+    $errors = validateBootstrapRequest(array_merge(validBootstrapPayload([
+        'handle' => 'inviteless2',
+        'professional_type' => 'influencer',
+    ]), ['join_brand_handle' => null]));
+
+    expect($errors)->not->toBeNull();
+    expect($errors)->toHaveKey('join_brand_handle');
+});
+
+it('accepts new affiliate signup with invite_token', function () {
+    $errors = validateBootstrapRequest(array_merge(
+        validBootstrapPayload(['handle' => 'withinvite']),
+        ['join_brand_handle' => null, 'invite_token' => 'some-test-invite-token']
+    ));
+
+    expect($errors)->toBeNull();
+});
+
+it('accepts new BRAND signup with no invite context', function () {
+    // Brands self-onboard; the invite-only rule must not apply to them.
+    $errors = validateBootstrapRequest(array_merge(
+        validBootstrapPayload([
+            'handle' => 'somebrand',
+            'professional_type' => 'brand',
+        ]),
+        ['join_brand_handle' => null]
+    ));
+
+    expect($errors)->toBeNull();
+});
+
+it('accepts re-bootstrap of existing professional without invite context', function () {
+    // An existing professional re-saving their profile must not be subject to
+    // the invite-only rule — they already passed it at signup.
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => '00000000-0000-0000-0000-00000000aaaa',
+        'auth_user_id' => 'existing-uid-rebootstrap',
+        'handle' => 'existingpro',
+        'handle_lc' => 'existingpro',
+        'professional_type' => 'professional',
+    ]);
+
+    $errors = validateBootstrapRequest(
+        array_merge(
+            validBootstrapPayload([
+                'handle' => 'existingpro',
+                'primary_email' => 'existingpro@example.com',
+            ]),
+            ['join_brand_handle' => null]
+        ),
+        uid: 'existing-uid-rebootstrap'
+    );
+
     expect($errors)->toBeNull();
 });
