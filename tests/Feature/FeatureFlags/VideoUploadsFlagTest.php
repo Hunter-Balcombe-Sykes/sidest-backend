@@ -16,8 +16,6 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-uses(Tests\TestCase::class);
-
 beforeEach(function () {
     setupProfessionalsTable();
     setupSitesTable();

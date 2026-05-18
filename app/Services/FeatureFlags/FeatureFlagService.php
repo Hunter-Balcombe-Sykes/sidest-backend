@@ -42,6 +42,9 @@ class FeatureFlagService
 
     private const REGISTRY_KEY = 'ff:registry';
 
+    /** @var array<string, array> Request-scoped memoization of loaded flag arrays, keyed by "{proId}:{brandId}". */
+    private array $requestCache = [];
+
     public function __construct(private CacheLockService $cacheLock) {}
 
     public function enabled(string $key, ?Professional $pro = null, ?BrandProfile $brand = null): bool
@@ -59,7 +62,11 @@ class FeatureFlagService
                 'request_id' => request()?->header('X-Request-Id'),
             ]);
 
-            return $this->resolveFromDb($key, $pro, $brand);
+            // Batch 3-query load so repeated enabled() calls during a Redis outage
+            // don't issue N×3 per-flag queries — same degraded path as allFor().
+            $result = $this->allForFromDb($pro, $brand);
+
+            return $result[$key] ?? (bool) config('partna.features.'.$key, false);
         }
     }
 
@@ -124,6 +131,10 @@ class FeatureFlagService
             );
         }
 
+        // Bust request-level memoization so any subsequent enabled() calls in
+        // this request see the new override rather than the now-stale memoized tuple.
+        $this->requestCache = [];
+
         try {
             if ($scope->brandId !== null) {
                 $this->forgetBrand($scope->brandId);
@@ -154,6 +165,8 @@ class FeatureFlagService
             $query->where('professional_id', $scope->professionalId)->whereNull('brand_id')->delete();
         }
 
+        $this->requestCache = [];
+
         try {
             if ($scope->brandId !== null) {
                 $this->forgetBrand($scope->brandId);
@@ -173,11 +186,16 @@ class FeatureFlagService
     /** Flush only the registry key (use after adding/editing a FeatureFlag row). */
     public function flushRegistry(): void
     {
+        $this->requestCache = [];
         Cache::forget(self::REGISTRY_KEY);
         Cache::forget(self::REGISTRY_KEY.':stale');
     }
 
-    /** Flush all FF cache keys. Useful in tests and admin operations. */
+    /**
+     * Flush the registry cache key. Per-pro/brand override keys (ff:pro:{id}, ff:brand:{id})
+     * are NOT flushed here — call forgetPro/forgetBrand to invalidate individual scopes.
+     * SWR stale copies persist up to ~50 min; natural expiry is the only guarantee.
+     */
     public function flush(): void
     {
         $this->flushRegistry();
@@ -201,11 +219,17 @@ class FeatureFlagService
 
     private function loadAll(?Professional $pro, ?BrandProfile $brand): array
     {
+        $cacheKey = ($pro?->id ?? 'null').':'.($brand?->id ?? 'null');
+
+        if (isset($this->requestCache[$cacheKey])) {
+            return $this->requestCache[$cacheKey];
+        }
+
         $registry = $this->loadRegistry();
         $proOverrides = $pro !== null ? $this->loadProOverrides($pro->id) : [];
         $brandOverrides = $brand !== null ? $this->loadBrandOverrides($brand->id) : [];
 
-        return [$registry, $proOverrides, $brandOverrides];
+        return $this->requestCache[$cacheKey] = [$registry, $proOverrides, $brandOverrides];
     }
 
     /**
@@ -366,21 +390,37 @@ class FeatureFlagService
 
         $proOverrides = [];
         if ($pro !== null) {
-            $proOverrides = FeatureFlagOverride::query()
+            $query = FeatureFlagOverride::query()
                 ->where('professional_id', $pro->id)
                 ->whereNull('brand_id')
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->get()
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+
+            if (DB::getDriverName() === 'pgsql') {
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('core.professionals')
+                    ->whereColumn('core.professionals.id', 'core.feature_flag_overrides.professional_id')
+                    ->whereNull('core.professionals.deleted_at'));
+            }
+
+            $proOverrides = $query->get()
                 ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
                 ->all();
         }
 
         $brandOverrides = [];
         if ($brand !== null) {
-            $brandOverrides = FeatureFlagOverride::query()
+            $query = FeatureFlagOverride::query()
                 ->where('brand_id', $brand->id)
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->get()
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+
+            if (DB::getDriverName() === 'pgsql') {
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('brand.brand_profiles')
+                    ->whereColumn('brand.brand_profiles.id', 'core.feature_flag_overrides.brand_id')
+                    ->whereNull('brand.brand_profiles.deleted_at'));
+            }
+
+            $brandOverrides = $query->get()
                 ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
                 ->all();
         }
@@ -411,11 +451,19 @@ class FeatureFlagService
 
         $proOverrides = [];
         if ($pro !== null) {
-            $row = FeatureFlagOverride::where('flag_key', $key)
+            $query = FeatureFlagOverride::where('flag_key', $key)
                 ->where('professional_id', $pro->id)
                 ->whereNull('brand_id')
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->first();
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+
+            if (DB::getDriverName() === 'pgsql') {
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('core.professionals')
+                    ->whereColumn('core.professionals.id', 'core.feature_flag_overrides.professional_id')
+                    ->whereNull('core.professionals.deleted_at'));
+            }
+
+            $row = $query->first();
             if ($row !== null) {
                 $proOverrides[$key] = (bool) $row->enabled;
             }
@@ -423,10 +471,18 @@ class FeatureFlagService
 
         $brandOverrides = [];
         if ($brand !== null) {
-            $row = FeatureFlagOverride::where('flag_key', $key)
+            $query = FeatureFlagOverride::where('flag_key', $key)
                 ->where('brand_id', $brand->id)
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->first();
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
+
+            if (DB::getDriverName() === 'pgsql') {
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('brand.brand_profiles')
+                    ->whereColumn('brand.brand_profiles.id', 'core.feature_flag_overrides.brand_id')
+                    ->whereNull('brand.brand_profiles.deleted_at'));
+            }
+
+            $row = $query->first();
             if ($row !== null) {
                 $brandOverrides[$key] = (bool) $row->enabled;
             }

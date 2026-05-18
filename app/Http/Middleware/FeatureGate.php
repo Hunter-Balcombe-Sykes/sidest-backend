@@ -10,6 +10,11 @@ use Illuminate\Http\Request;
 // rollout % + config fallback) and short-circuits with 503 when the flag is off.
 // Fails closed: an unknown flag key = off.
 // Apply via route middleware: `->middleware('feature:smart_booking')`.
+//
+// NOTE: No professional/brand context is passed to enabled() — per-tenant overrides
+// are NOT evaluated here. This middleware is intentionally a global launch gate only.
+// Per-tenant override semantics require resolving a Professional model first; use
+// feature($key, $pro) inside controller/service code for tenant-aware checks.
 class FeatureGate
 {
     public function handle(Request $request, Closure $next, string $flag): mixed

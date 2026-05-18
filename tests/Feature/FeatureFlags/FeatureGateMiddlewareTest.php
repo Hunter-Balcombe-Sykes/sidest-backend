@@ -1,8 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Tests\Feature\FeatureFlags\FeatureFlagTestCase;
 
 use function Pest\Laravel\get;
+
+beforeEach(fn () => FeatureFlagTestCase::boot());
 
 it('exposes three launch feature flags via config', function () {
     expect(config('partna.features'))

@@ -1,7 +1,5 @@
 <?php
 
-uses(Tests\TestCase::class);
-
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\Professional\Professional;
 use App\Services\FeatureFlags\FeatureFlagService;
@@ -20,8 +18,8 @@ function makePro(): Professional
 {
     $id = (string) Str::uuid();
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'     => $id,
-        'handle' => 'pro-' . substr($id, 0, 8),
+        'id' => $id,
+        'handle' => 'pro-'.substr($id, 0, 8),
         'status' => 'active',
     ]);
 

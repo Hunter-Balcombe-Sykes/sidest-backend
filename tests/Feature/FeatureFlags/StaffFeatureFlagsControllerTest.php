@@ -15,8 +15,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\FeatureFlags\FeatureFlagTestCase;
 
-uses(Tests\TestCase::class);
-
 beforeEach(function () {
     Cache::flush();
     FeatureFlagTestCase::boot();
@@ -47,9 +45,9 @@ beforeEach(function () {
  * partial Mockery override just for ->validated().
  *
  * @template T of \Illuminate\Foundation\Http\FormRequest
- * @param class-string<T> $class
- * @param array<string,mixed> $validatedData
- * @param \App\Models\Core\Staff\PartnaStaff $staff
+ *
+ * @param  class-string<T>  $class
+ * @param  array<string,mixed>  $validatedData
  * @return T&\Mockery\MockInterface
  */
 function mockFormRequest(string $class, array $validatedData, PartnaStaff $staff): mixed
@@ -62,7 +60,7 @@ function mockFormRequest(string $class, array $validatedData, PartnaStaff $staff
     $ref = new \ReflectionClass(\Symfony\Component\HttpFoundation\Request::class);
     $prop = $ref->getProperty('attributes');
     $prop->setAccessible(true);
-    $prop->setValue($mock, new \Symfony\Component\HttpFoundation\ParameterBag());
+    $prop->setValue($mock, new \Symfony\Component\HttpFoundation\ParameterBag);
 
     $mock->attributes->set('partna_staff', $staff);
 

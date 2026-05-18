@@ -3,8 +3,6 @@
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-uses(Tests\TestCase::class);
-
 it('deletes expired overrides, keeps active ones', function () {
     $proId = (string) Str::uuid();
     $pro2Id = (string) Str::uuid();

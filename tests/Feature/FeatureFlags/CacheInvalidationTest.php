@@ -10,8 +10,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\FeatureFlags\FeatureFlagTestCase;
 
-uses(Tests\TestCase::class);
-
 beforeEach(function () {
     Cache::flush();
     FeatureFlagTestCase::boot();

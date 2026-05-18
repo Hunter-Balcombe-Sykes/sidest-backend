@@ -1,7 +1,5 @@
 <?php
 
-uses(Tests\TestCase::class);
-
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional\BrandProfile;
@@ -18,20 +16,20 @@ beforeEach(function () {
 
     $proId = (string) Str::uuid();
     DB::connection('pgsql')->table('core.professionals')->insert([
-        'id'               => $proId,
-        'handle'           => 'test-pro',
-        'display_name'     => 'Test Pro',
-        'primary_email'    => 'test@example.com',
+        'id' => $proId,
+        'handle' => 'test-pro',
+        'display_name' => 'Test Pro',
+        'primary_email' => 'test@example.com',
         'professional_type' => 'professional',
-        'status'           => 'active',
+        'status' => 'active',
     ]);
     $this->pro = Professional::find($proId);
 
     $brandId = (string) Str::uuid();
     DB::connection('pgsql')->table('brand.brand_profiles')->insert([
-        'id'              => $brandId,
+        'id' => $brandId,
         'professional_id' => $proId,
-        'brand_status'    => 'active',
+        'brand_status' => 'active',
     ]);
     $this->brand = BrandProfile::find($brandId);
 
@@ -58,9 +56,9 @@ it('falls back to config when flag row missing', function () {
 it('pro override wins over default', function () {
     FeatureFlag::create(['key' => 'test_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
     FeatureFlagOverride::create([
-        'flag_key'        => 'test_flag',
+        'flag_key' => 'test_flag',
         'professional_id' => $this->pro->id,
-        'enabled'         => true,
+        'enabled' => true,
     ]);
     expect($this->service->enabled('test_flag', $this->pro))->toBeTrue();
 });
@@ -68,14 +66,14 @@ it('pro override wins over default', function () {
 it('brand override wins over pro override', function () {
     FeatureFlag::create(['key' => 'test_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
     FeatureFlagOverride::create([
-        'flag_key'        => 'test_flag',
+        'flag_key' => 'test_flag',
         'professional_id' => $this->pro->id,
-        'enabled'         => true,
+        'enabled' => true,
     ]);
     FeatureFlagOverride::create([
         'flag_key' => 'test_flag',
         'brand_id' => $this->brand->id,
-        'enabled'  => false,
+        'enabled' => false,
     ]);
     expect($this->service->enabled('test_flag', $this->pro, $this->brand))->toBeFalse();
 });
@@ -83,10 +81,10 @@ it('brand override wins over pro override', function () {
 it('expired overrides are ignored', function () {
     FeatureFlag::create(['key' => 'test_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
     FeatureFlagOverride::create([
-        'flag_key'        => 'test_flag',
+        'flag_key' => 'test_flag',
         'professional_id' => $this->pro->id,
-        'enabled'         => true,
-        'expires_at'      => now()->subMinute(),
+        'enabled' => true,
+        'expires_at' => now()->subMinute(),
     ]);
     expect($this->service->enabled('test_flag', $this->pro))->toBeFalse();
 });

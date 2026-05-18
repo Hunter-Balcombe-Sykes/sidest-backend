@@ -34,6 +34,7 @@ class StaffFeatureFlagController extends ApiController
 
         $flag = FeatureFlag::create($request->validated());
         $this->service->flushRegistry();
+        $flag->loadCount('overrides');
 
         return (new FeatureFlagResource($flag))->response()->setStatusCode(201);
     }
@@ -46,6 +47,7 @@ class StaffFeatureFlagController extends ApiController
         $flag = FeatureFlag::findOrFail($key);
         $flag->update($request->validated());
         $this->service->flushRegistry();
+        $flag->loadCount('overrides');
 
         return (new FeatureFlagResource($flag))->response();
     }
