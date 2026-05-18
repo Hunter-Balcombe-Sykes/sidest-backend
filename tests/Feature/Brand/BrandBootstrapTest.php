@@ -235,6 +235,33 @@ it('creates a BrandProfile when bootstrapping a brand account', function () {
     expect((bool) $brandProfile->setup_complete)->toBeFalse();
 });
 
+it('returns 409 EMAIL_ALREADY_REGISTERED when a different auth user owns the email', function () {
+    [$controller, $accountDefaults] = makeBrandBootstrapController();
+
+    // Existing professional owned by a different Supabase user.
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => (string) Str::uuid(),
+        'auth_user_id' => 'original-owner-uid',
+        'handle' => 'taken',
+        'handle_lc' => 'taken',
+        'display_name' => 'Taken',
+        'primary_email' => 'collision@example.com',
+        'status' => 'active',
+    ]);
+
+    $response = callBrandBootstrap($controller, $accountDefaults, [
+        'handle' => 'newuser'.Str::random(4),
+        'display_name' => 'New User',
+        'primary_email' => 'COLLISION@example.com', // case-insensitive match
+        'phone' => '0400000002',
+        'first_name' => 'New',
+        'professional_type' => 'professional',
+    ], uid: 'new-google-user-uid');
+
+    expect($response->getStatusCode())->toBe(409);
+    expect($response->getData(true)['errors']['code'] ?? null)->toBe('EMAIL_ALREADY_REGISTERED');
+});
+
 it('does not create a BrandProfile for non-brand types', function () {
     [$controller, $accountDefaults] = makeBrandBootstrapController();
 

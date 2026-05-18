@@ -72,6 +72,22 @@ class BootstrapController extends ApiController
                 $professional = Professional::query()->where('auth_user_id', $uid)->first();
 
                 if (! $professional) {
+                    // Defensive: a different Supabase user already owns this email
+                    // (e.g. signed up with password, now retrying via Google OAuth
+                    // without identity-linking enabled). Surface a clean 409 instead
+                    // of letting the unique-index on primary_email throw a 500.
+                    $emailLc = strtolower(trim((string) $data['primary_email']));
+                    if ($emailLc !== '') {
+                        $existingByEmail = Professional::query()
+                            ->whereRaw('lower(primary_email) = ?', [$emailLc])
+                            ->where('auth_user_id', '!=', $uid)
+                            ->exists();
+
+                        if ($existingByEmail) {
+                            throw new RuntimeException('EMAIL_ALREADY_REGISTERED');
+                        }
+                    }
+
                     $createdProfessional = true;
                     $professional = new Professional([
                         'handle' => $data['handle'],
@@ -278,6 +294,25 @@ class BootstrapController extends ApiController
                     'shopify_integration_id' => $shopifyIntegrationId,
                 ];
             });
+        } catch (RuntimeException $e) {
+            if ($e->getMessage() === 'EMAIL_ALREADY_REGISTERED') {
+                Log::info('Bootstrap rejected: email already registered to another auth user', [
+                    'uid' => $uid,
+                    'email' => $data['primary_email'] ?? null,
+                ]);
+
+                return $this->error(
+                    'This email is already associated with a different account. Sign in with your original method, or contact support to link accounts.',
+                    409,
+                    ['code' => 'EMAIL_ALREADY_REGISTERED']
+                );
+            }
+
+            Log::error('Bootstrap transaction failed', [
+                'error' => $e->getMessage(),
+                'uid' => $uid,
+            ]);
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Bootstrap transaction failed', [
                 'error' => $e->getMessage(),

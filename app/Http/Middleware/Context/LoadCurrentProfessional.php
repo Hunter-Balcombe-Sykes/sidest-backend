@@ -4,6 +4,7 @@ namespace App\Http\Middleware\Context;
 
 use App\Services\Cache\ProfessionalCacheService;
 use Closure;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
@@ -57,6 +58,13 @@ class LoadCurrentProfessional
             ], 403);
         }
 
+        // Passive sync of primary_email from the verified Supabase JWT claims.
+        // The token already carries the current email — no extra network/db cost
+        // on the happy path (one strcasecmp). UPDATE fires only on actual drift,
+        // which is a rare lifetime event per user. Only honoured for verified
+        // emails to avoid an unverified secondary identity from poisoning the row.
+        $this->syncEmailFromClaims($request, $professional);
+
         $request->attributes->set('professional', $professional);
 
         // Tag Nightwatch records with tenant identity. The full Context blob is
@@ -69,5 +77,43 @@ class LoadCurrentProfessional
         ]);
 
         return $next($request);
+    }
+
+    /**
+     * Reconcile professionals.primary_email with the verified email claim from
+     * the Supabase JWT. Catches unique-index collisions explicitly so a user
+     * whose Google email now matches another Partna account doesn't 500 — the
+     * old email stays, the collision is logged, the request still succeeds.
+     */
+    private function syncEmailFromClaims(Request $request, $professional): void
+    {
+        $claims = $request->attributes->get('supabase_claims');
+        if (! is_array($claims)) {
+            return;
+        }
+
+        $claimedEmail = $claims['email'] ?? null;
+        $emailVerified = (bool) ($claims['email_verified'] ?? false);
+
+        if (! is_string($claimedEmail) || $claimedEmail === '' || ! $emailVerified) {
+            return;
+        }
+
+        $current = (string) ($professional->primary_email ?? '');
+        if (strcasecmp($claimedEmail, $current) === 0) {
+            return;
+        }
+
+        try {
+            $professional->primary_email = $claimedEmail;
+            $professional->save();
+            $this->professionalCache->invalidateProfessional($professional);
+        } catch (UniqueConstraintViolationException $e) {
+            Log::warning('LoadCurrentProfessional email sync collision', [
+                'professional_id' => (string) $professional->id,
+                'attempted_email' => $claimedEmail,
+                'reason' => $e->getMessage(),
+            ]);
+        }
     }
 }
