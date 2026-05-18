@@ -71,10 +71,10 @@
                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                                     <tr>
                                         <td valign="middle" style="line-height:0;">
-                                            <img src="https://app.partna.au/branding/Partna/email-icon.png" alt="" width="24" height="24" style="display:block; width:24px; height:24px; border:0; outline:none;">
+                                            <img src="https://app.partna.au/branding/Partna/email-icon.png" alt="" width="20" height="20" style="display:block; width:20px; height:20px; border:0; outline:none;">
                                         </td>
                                         <td valign="middle" style="line-height:0; padding-left:14px;">
-                                            <img src="https://app.partna.au/branding/Partna/email-wordmark.png" alt="Partna" width="91" height="24" style="display:block; width:91px; height:24px; border:0; outline:none;">
+                                            <img src="https://app.partna.au/branding/Partna/email-wordmark.png" alt="Partna" width="76" height="20" style="display:block; width:76px; height:20px; border:0; outline:none;">
                                         </td>
                                     </tr>
                                 </table>

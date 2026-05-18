@@ -98,11 +98,12 @@ it('dispatches MagicLinkMail for magiclink action', function (): void {
     Mail::assertSent(MagicLinkMail::class);
 });
 
-it('dispatches EmailConfirmMail for signup action', function (): void {
+it('dispatches EmailConfirmMail for signup action with the 6-digit code', function (): void {
     $req = makeSupabaseHookRequest([
         'user' => ['email' => 'newby@partna.au', 'user_metadata' => ['name' => 'Newby']],
         'email_data' => [
-            'token_hash' => 'tok_signup',
+            'token_hash' => 'tok_signup_hash',
+            'token' => '142857',
             'email_action_type' => 'signup',
             'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
         ],
@@ -116,7 +117,33 @@ it('dispatches EmailConfirmMail for signup action', function (): void {
     ], $req['body']);
 
     $response->assertOk();
-    Mail::assertSent(EmailConfirmMail::class);
+    Mail::assertSent(EmailConfirmMail::class, function (EmailConfirmMail $m): bool {
+        return $m->recipientEmail === 'newby@partna.au'
+            && $m->displayName === 'Newby'
+            && $m->code === '142857';
+    });
+});
+
+it('returns handled=false for signup when Supabase omits the 6-digit code', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'newby@partna.au'],
+        'email_data' => [
+            'token_hash' => 'tok_signup_hash',
+            // 'token' deliberately missing — defensively handled
+            'email_action_type' => 'signup',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    expect($response->json('handled'))->toBeFalse();
+    Mail::assertNothingSent();
 });
 
 it('dispatches InviteMail for invite action', function (): void {
