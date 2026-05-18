@@ -78,6 +78,13 @@ it('index returns 401 when staff not on request', function () {
 
 // ── StaffFeatureFlagController::store ────────────────────────────────────────
 
+it('store returns 401 when staff not on request', function () {
+    $request = CreateFeatureFlagRequest::create('/', 'POST', []);
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->flagController->store($request);
+});
+
 it('store creates a flag with valid data', function () {
     $formRequest = mockFormRequest(CreateFeatureFlagRequest::class, [
         'key' => 'new_flag',
@@ -124,6 +131,13 @@ it('store validation accepts valid lowercase_underscore key', function () {
 
 // ── StaffFeatureFlagController::update ───────────────────────────────────────
 
+it('update returns 401 when staff not on request', function () {
+    $request = UpdateFeatureFlagRequest::create('/', 'PATCH', ['rollout_percent' => 50]);
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->flagController->update($request, 'any_flag');
+});
+
 it('update changes rollout_percent on an existing flag', function () {
     FeatureFlag::create(['key' => 'update_flag', 'default_enabled' => true, 'rollout_percent' => 10]);
 
@@ -164,6 +178,13 @@ it('update changes description on an existing flag', function () {
 
 // ── StaffFeatureFlagController::destroy ──────────────────────────────────────
 
+it('destroy returns 401 when staff not on request', function () {
+    $request = Request::create('/', 'DELETE');
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->flagController->destroy($request, 'any_flag');
+});
+
 it('destroy soft-deletes a flag', function () {
     FeatureFlag::create(['key' => 'delete_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
 
@@ -185,7 +206,26 @@ it('destroy throws ModelNotFoundException for unknown flag', function () {
     $this->flagController->destroy($request, 'nonexistent_flag');
 });
 
+// ── StaffFeatureFlagOverrideController::index ─────────────────────────────────
+
+it('override index returns 401 when staff not on request', function () {
+    $request = Request::create('/', 'GET');
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->overrideController->index($request, 'any_flag');
+});
+
 // ── StaffFeatureFlagOverrideController::store ─────────────────────────────────
+
+it('override store returns 401 when staff not on request', function () {
+    $request = CreateOverrideRequest::create('/', 'POST', [
+        'professional_id' => (string) Str::uuid(),
+        'enabled' => true,
+    ]);
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->overrideController->store($request, 'any_flag');
+});
 
 it('store override creates a professional override', function () {
     FeatureFlag::create(['key' => 'override_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
@@ -268,6 +308,13 @@ it('store override validation rejects when both professional_id and brand_id pro
 });
 
 // ── StaffFeatureFlagOverrideController::destroy ───────────────────────────────
+
+it('override destroy returns 401 when staff not on request', function () {
+    $request = Request::create('/', 'DELETE');
+
+    $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    $this->overrideController->destroy($request, (string) Str::uuid());
+});
 
 it('destroy override removes the override', function () {
     FeatureFlag::create(['key' => 'destroy_ov_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
