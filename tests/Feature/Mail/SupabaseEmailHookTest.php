@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Mail;
 
 beforeEach(function (): void {
     Mail::fake();
+    Config::set('services.supabase.anon_key', 'eyJ-test-anon-key');
 });
 
 /**
@@ -70,6 +71,7 @@ it('dispatches PasswordResetMail for recovery action', function (): void {
         return $m->recipientEmail === 'tobias@partna.au'
             && $m->displayName === 'Tobias'
             && str_contains($m->verifyUrl, '/auth/v1/verify')
+            && str_contains($m->verifyUrl, 'apikey=eyJ-test-anon-key')
             && str_contains($m->verifyUrl, 'token=pkce_abc123')
             && str_contains($m->verifyUrl, 'type=recovery');
     });
