@@ -38,20 +38,18 @@ class HydrogenDeploymentController extends ApiController
 
         $settings = $query->get(['professional_id', 'oxygen_deployment_token', 'oxygen_storefront_id']);
 
-        $targets = $settings->map(function (BrandStoreSettings $row) {
-            // Resolve the shop domain from the brand's Shopify integration
-            $integration = ProfessionalIntegration::query()
-                ->where('professional_id', $row->professional_id)
-                ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
-                ->value('shopify_shop_domain');
+        // Single batch query for all shop domains — avoids one query per brand.
+        $domains = ProfessionalIntegration::query()
+            ->whereIn('professional_id', $settings->pluck('professional_id'))
+            ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
+            ->pluck('shopify_shop_domain', 'professional_id');
 
-            return [
-                'shop_domain' => $integration,
-                // Decrypted by the encrypted cast — never stored in plain text
-                'oxygen_deployment_token' => $row->oxygen_deployment_token,
-                'oxygen_storefront_id' => $row->oxygen_storefront_id,
-            ];
-        })->values();
+        $targets = $settings->map(fn (BrandStoreSettings $row) => [
+            'shop_domain' => $domains->get($row->professional_id),
+            // Decrypted by the encrypted cast — never stored in plain text
+            'oxygen_deployment_token' => $row->oxygen_deployment_token,
+            'oxygen_storefront_id' => $row->oxygen_storefront_id,
+        ])->values();
 
         return $this->success($targets);
     }

@@ -12,7 +12,7 @@ class SubscriptionResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'plan' => [
+            'plan' => $this->whenLoaded('plan', fn () => [
                 'id' => $this->plan->id,
                 'plan_key' => $this->plan->plan_key,
                 'name' => $this->plan->name,
@@ -20,7 +20,7 @@ class SubscriptionResource extends JsonResource
                 'currency_code' => $this->plan->currency_code,
                 'billing_interval' => $this->plan->billing_interval,
                 'entitlements' => $this->plan->entitlements,
-            ],
+            ]),
             'provider' => $this->provider,
             'status' => $this->status,
             'current_period_start' => $this->current_period_start,

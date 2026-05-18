@@ -173,6 +173,8 @@ class SiteMedia extends BaseModel
      */
     public function variantUrls(): array
     {
+        $this->loadMissing('mediaVariants');
+
         return $this->mediaVariants
             ->filter(fn (MediaVariant $v) => $v->artifact_type === 'webp')
             ->mapWithKeys(fn (MediaVariant $v) => [$v->variant_key => $v->url])
