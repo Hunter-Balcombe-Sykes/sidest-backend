@@ -235,6 +235,14 @@ Schedule::job(new \App\Jobs\Stripe\MonitorManualRefundQueueJob)
 // Phase 3 backstop reconciler. Cron expression is env-overridable: set
 // PARTNA_RECONCILER_SCHEDULE='0 * * * *' for the first 60 days post-launch,
 // then revert to the default daily-at-3am value.
+Schedule::command('feature-flags:prune-expired')
+    ->dailyAt('03:30')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->onFailure(function (): void {
+        \Illuminate\Support\Facades\Log::error('Scheduled task failed: feature-flags:prune-expired');
+    });
+
 Schedule::command('partna:reconcile-shopify-orders')
     ->cron(config('partna.reconciler.schedule', '0 3 * * *'))
     ->withoutOverlapping(60 * 60) // 1h overlap guard

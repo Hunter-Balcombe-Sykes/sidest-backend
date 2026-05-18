@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagemen
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStripeConnectController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
+use App\Http\Controllers\Api\Staff\FeatureFlag\StaffFeatureFlagController;
+use App\Http\Controllers\Api\Staff\FeatureFlag\StaffFeatureFlagOverrideController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAffiliateSelectionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
@@ -414,6 +416,22 @@ Route::prefix('staff')
             [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffAffiliatePhotoController::class, 'destroy'])
             ->where('gid', 'gid://shopify/Product/[0-9]+')
             ->whereUuid('media');
+
+        // Feature flag admin — create/update/delete flags and per-tenant overrides.
+        Route::prefix('feature-flags')->group(function (): void {
+            Route::get('/', [StaffFeatureFlagController::class, 'index']);
+            Route::post('/', [StaffFeatureFlagController::class, 'store']);
+            Route::patch('{key}', [StaffFeatureFlagController::class, 'update'])
+                ->where('key', '[a-z][a-z0-9_]*');
+            Route::delete('{key}', [StaffFeatureFlagController::class, 'destroy'])
+                ->where('key', '[a-z][a-z0-9_]*');
+            Route::get('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'index'])
+                ->where('key', '[a-z][a-z0-9_]*');
+            Route::post('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'store'])
+                ->where('key', '[a-z][a-z0-9_]*');
+            Route::delete('overrides/{id}', [StaffFeatureFlagOverrideController::class, 'destroy'])
+                ->whereUuid('id');
+        });
 
         // GDPR-triggered erasure: support invokes the same lifecycle as self-service
         // but skips the email-token step. Reason field is mandatory.

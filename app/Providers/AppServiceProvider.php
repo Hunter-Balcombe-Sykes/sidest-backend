@@ -99,6 +99,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Gdpr\DataExportAudit::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Commerce\AffiliateProductSelection::class, \App\Policies\AffiliateProductPolicy::class);
         Gate::policy(\App\Models\Core\Staff\PartnaStaff::class, \App\Policies\PartnaStaffPolicy::class);
+        Gate::policy(\App\Models\Core\FeatureFlag::class, \App\Policies\FeatureFlagPolicy::class);
+        Gate::policy(\App\Models\Core\FeatureFlagOverride::class, \App\Policies\FeatureFlagPolicy::class);
 
         // Stripe payment-method abilities — bypasses model-class dispatch so
         // CommissionPolicy methods are reachable without overriding the Professional→

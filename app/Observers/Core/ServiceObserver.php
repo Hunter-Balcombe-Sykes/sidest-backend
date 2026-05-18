@@ -176,10 +176,6 @@ class ServiceObserver
 
     private function shouldDispatchSquareSync(?Professional $professional): bool
     {
-        if (! (bool) config('partna.features.square_sync', false)) {
-            return false;
-        }
-
         if (! $professional) {
             return false;
         }
@@ -194,10 +190,6 @@ class ServiceObserver
 
     private function shouldDispatchFreshaSync(?Professional $professional): bool
     {
-        if (! (bool) config('partna.features.fresha_sync', false)) {
-            return false;
-        }
-
         if (! $professional) {
             return false;
         }

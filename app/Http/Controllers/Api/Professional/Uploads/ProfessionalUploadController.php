@@ -15,6 +15,7 @@ use App\Jobs\ProcessImageVariantsJob;
 use App\Jobs\ProcessVideoVariantsJob;
 use App\Models\Core\Site\SiteMedia;
 use App\Services\Cache\SiteCacheService;
+use App\Services\FeatureFlags\FeatureFlagService;
 use App\Services\Media\BrandDesignMediaService;
 use App\Services\Media\ImageVariantService;
 use App\Services\Media\VideoVariantService;
@@ -63,6 +64,12 @@ class ProfessionalUploadController extends ApiController
 
         $pool = $request->validated('pool');
         $isVideo = $request->hasFile('video');
+
+        // Gate video uploads behind the per-tenant feature flag.
+        if ($isVideo && ! app(FeatureFlagService::class)->enabled('video_uploads', $pro)) {
+            return $this->error('Video uploads are not enabled for your account.', 403);
+        }
+
         $file = $isVideo ? $request->file('video') : $request->file('image');
         $mediaType = $isVideo ? SiteMedia::MEDIA_TYPE_VIDEO : SiteMedia::MEDIA_TYPE_IMAGE;
 

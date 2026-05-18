@@ -137,7 +137,7 @@ class UpdateSiteRequest extends BaseFormRequest
             'settings.booking_mode' => [
                 'sometimes',
                 'string',
-                Rule::in(config('partna.features.smart_booking') ? ['manual', 'smart'] : ['manual']),
+                Rule::in(['manual']),
             ],
             'settings.manual_booking_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
             'settings.selected_products' => ['prohibited'],

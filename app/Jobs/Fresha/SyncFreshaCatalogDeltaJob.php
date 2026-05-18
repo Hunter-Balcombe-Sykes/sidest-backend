@@ -33,10 +33,6 @@ class SyncFreshaCatalogDeltaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
-        if (! (bool) config('partna.features.fresha_sync', false)) {
-            return;
-        }
-
         $integration = ProfessionalIntegration::query()
             ->where('provider', ProfessionalIntegration::PROVIDER_FRESHA)
             ->where('external_account_id', $this->businessId)
