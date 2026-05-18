@@ -241,13 +241,13 @@ Route::prefix('staff')
             Route::get('/', [StaffFeatureFlagController::class, 'index']);
             Route::post('/', [StaffFeatureFlagController::class, 'store']);
             Route::patch('{key}', [StaffFeatureFlagController::class, 'update'])
-                ->where('key', '[a-z0-9_.-]+');
+                ->where('key', '[a-z][a-z0-9_]*');
             Route::delete('{key}', [StaffFeatureFlagController::class, 'destroy'])
-                ->where('key', '[a-z0-9_.-]+');
+                ->where('key', '[a-z][a-z0-9_]*');
             Route::get('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'index'])
-                ->where('key', '[a-z0-9_.-]+');
+                ->where('key', '[a-z][a-z0-9_]*');
             Route::post('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'store'])
-                ->where('key', '[a-z0-9_.-]+');
+                ->where('key', '[a-z][a-z0-9_]*');
             Route::delete('overrides/{id}', [StaffFeatureFlagOverrideController::class, 'destroy'])
                 ->whereUuid('id');
         });

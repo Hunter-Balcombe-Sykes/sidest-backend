@@ -7,14 +7,14 @@ use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional\Professional;
 
 /**
- * V2: Authorization gate for FeatureFlag and FeatureFlagOverride.
+ * Defensive deny-all policy for FeatureFlag and FeatureFlagOverride.
  *
- * These models are exclusively managed via staff routes, which are already
- * guarded by the EnsurePartnaStaff middleware (PartnaStaff auth — separate
- * surface from Professional). This policy denies Professional actors so that
- * a misconfigured non-staff route cannot leak access.
+ * Real auth: the EnsurePartnaStaff middleware on the staff route group
+ * (supabase.jwt + staff + staff.admin + throttle:staff). All methods here
+ * return false so that a misconfigured non-staff route cannot grant access
+ * to a Professional actor via Gate::forUser($pro).
  *
- * Registered for both FeatureFlag and FeatureFlagOverride in AppServiceProvider.
+ * PartnaStaff actors bypass this policy entirely — the middleware is the gate.
  */
 class FeatureFlagPolicy extends BasePolicy
 {

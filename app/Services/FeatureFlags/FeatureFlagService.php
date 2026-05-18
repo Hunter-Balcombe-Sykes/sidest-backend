@@ -78,22 +78,9 @@ class FeatureFlagService
                 'brand_id' => $brand?->id,
                 'request_id' => request()?->header('X-Request-Id'),
             ]);
-
-            $registry = FeatureFlag::query()
-                ->whereNull('deleted_at')
-                ->get()
-                ->mapWithKeys(fn ($f) => [$f->key => [
-                    'default_enabled' => (bool) $f->default_enabled,
-                    'rollout_percent' => (int) $f->rollout_percent,
-                ]])
-                ->all();
-
-            $result = [];
-            foreach (array_keys($registry) as $k) {
-                $result[$k] = $this->resolveFromDb($k, $pro, $brand);
-            }
-
-            return $result;
+            // Degrade: load all data in 3 queries (registry + pro overrides + brand overrides)
+            // then resolve from arrays without cache.
+            return $this->allForFromDb($pro, $brand);
         }
 
         $result = [];
@@ -320,6 +307,51 @@ class FeatureFlagService
                     ->all();
             },
         );
+    }
+
+    /**
+     * Batch DB fallback for allFor() when cache is unavailable.
+     * Loads registry + pro overrides + brand overrides in 3 queries, then
+     * resolves the full map from arrays — no N+1 per flag key.
+     */
+    private function allForFromDb(?Professional $pro, ?BrandProfile $brand): array
+    {
+        $registry = FeatureFlag::query()
+            ->whereNull('deleted_at')
+            ->get()
+            ->mapWithKeys(fn ($f) => [$f->key => [
+                'default_enabled' => (bool) $f->default_enabled,
+                'rollout_percent' => (int) $f->rollout_percent,
+            ]])
+            ->all();
+
+        $proOverrides = [];
+        if ($pro !== null) {
+            $proOverrides = FeatureFlagOverride::query()
+                ->where('professional_id', $pro->id)
+                ->whereNull('brand_id')
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                ->get()
+                ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
+                ->all();
+        }
+
+        $brandOverrides = [];
+        if ($brand !== null) {
+            $brandOverrides = FeatureFlagOverride::query()
+                ->where('brand_id', $brand->id)
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                ->get()
+                ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
+                ->all();
+        }
+
+        $result = [];
+        foreach (array_keys($registry) as $k) {
+            $result[$k] = $this->resolveFromArrays($k, $registry, $proOverrides, $brandOverrides, $pro);
+        }
+
+        return $result;
     }
 
     /**
