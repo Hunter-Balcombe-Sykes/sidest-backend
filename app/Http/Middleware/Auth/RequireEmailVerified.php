@@ -34,7 +34,16 @@ class RequireEmailVerified
             ], 401);
         }
 
-        if (! (bool) ($claims['email_verified'] ?? false)) {
+        // Supabase puts email_verified in both the JWT root and inside
+        // user_metadata, but which one is populated depends on project age
+        // + provider. Legacy projects (incl. this one's email/password users)
+        // only have user_metadata.email_verified; modern asymmetric-JWT
+        // setups duplicate it at the root. Check both so we don't 403 users
+        // whose Supabase row clearly shows email_confirmed_at set.
+        $userMetadata = is_array($claims['user_metadata'] ?? null) ? $claims['user_metadata'] : [];
+        $emailVerified = (bool) ($claims['email_verified'] ?? $userMetadata['email_verified'] ?? false);
+
+        if (! $emailVerified) {
             return response()->json([
                 'error' => 'email_verification_required',
                 'message' => 'Verify your email to continue.',
