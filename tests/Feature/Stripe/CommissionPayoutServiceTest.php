@@ -875,6 +875,10 @@ it('treats UniqueConstraintViolationException on payout natural key as another w
     // SQLite scopes index names by attached-database name (`schema.indexname`)
     // rather than by referenced-table schema, so the production
     // `commerce.commission_payouts_natural_key_uq` becomes this in tests.
+    // Note also: production uses `((eligible_after AT TIME ZONE 'UTC')::date)`
+    // but SQLite has no AT TIME ZONE — `date(eligible_after)` is the closest
+    // equivalent and is sufficient here because the test only exercises the
+    // catch path, not the timezone-correctness of the bucketing expression.
     DB::connection('pgsql')->statement(
         'CREATE UNIQUE INDEX IF NOT EXISTS commerce.commission_payouts_natural_key_uq
          ON commission_payouts (

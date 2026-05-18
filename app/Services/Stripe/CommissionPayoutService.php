@@ -222,8 +222,9 @@ class CommissionPayoutService
             return $this->createPayoutBatchTransactional($brandId, $affiliateId, $currency, $cutoff);
         } catch (UniqueConstraintViolationException $e) {
             // Partial-unique conflict on (brand_professional_id, affiliate_professional_id,
-            // eligible_after) for a non-terminal payout — another sweep beat us to it.
-            // The transaction has already rolled back, so no orders were linked.
+            // currency_code, eligible_after::date) for a non-terminal payout — another
+            // sweep beat us to it. The transaction has already rolled back, so no orders
+            // were linked.
             Log::warning('Commission payout batch lost natural-key race; treating as created by concurrent worker', [
                 'brand_id' => $brandId,
                 'affiliate_id' => $affiliateId,
