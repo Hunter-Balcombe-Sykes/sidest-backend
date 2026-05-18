@@ -35,4 +35,53 @@ abstract class BasePolicy
     {
         return Response::denyAsNotFound('Not found.');
     }
+
+    /**
+     * Allow only sessions at AAL2 (passed at least one MFA factor this session).
+     * Use for "this action requires MFA but doesn't need re-verification".
+     *
+     * Returns 401 (not 403) — frontend interprets 401 + a recognizable message
+     * as "trigger step-up challenge".
+     */
+    protected function requiresAal2(): Response
+    {
+        $aal = request()->attributes->get('supabase_aal', 'aal1');
+
+        return $aal === 'aal2'
+            ? Response::allow()
+            : Response::denyWithStatus(401, 'MFA required for this action');
+    }
+
+    /**
+     * "Fresh" AAL2 — was the user's most recent MFA verification inside
+     * $maxAgeSeconds? Use for high-risk actions where AAL2 alone is too weak
+     * (an attacker on an already-aal2 session could otherwise act freely).
+     *
+     * AAL stays sticky at aal2 for the life of the session (Supabase doesn't
+     * downgrade it on token refresh), so we have to inspect the amr timeline
+     * to enforce "verify recently". The amr array is ordered most-recent-first
+     * per Supabase docs; we scan for the first mfa-method entry and compare
+     * its timestamp to now.
+     *
+     * @param  int  $maxAgeSeconds  Window. Default in config('partna.mfa.fresh_window_seconds').
+     */
+    protected function requiresFreshAal2(?int $maxAgeSeconds = null): Response
+    {
+        $maxAgeSeconds ??= (int) config('partna.mfa.fresh_window_seconds', 300);
+        $amr = request()->attributes->get('supabase_amr', []);
+        $mfaMethods = ['totp', 'phone', 'webauthn'];
+
+        foreach ($amr as $entry) {
+            $method = $entry['method'] ?? null;
+            if (in_array($method, $mfaMethods, true)) {
+                $age = time() - (int) ($entry['timestamp'] ?? 0);
+
+                return $age <= $maxAgeSeconds
+                    ? Response::allow()
+                    : Response::denyWithStatus(401, 'Recent MFA verification required');
+            }
+        }
+
+        return Response::denyWithStatus(401, 'Recent MFA verification required');
+    }
 }
