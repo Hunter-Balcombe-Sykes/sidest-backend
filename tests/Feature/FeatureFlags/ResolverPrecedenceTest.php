@@ -7,11 +7,13 @@ use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional\Professional;
 use App\Services\FeatureFlags\FeatureFlagService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\FeatureFlags\FeatureFlagTestCase;
 
 beforeEach(function () {
+    Cache::flush();
     FeatureFlagTestCase::boot();
 
     $proId = (string) Str::uuid();
@@ -41,6 +43,7 @@ it('returns global default when no override and no rollout', function () {
     expect($this->service->enabled('test_flag', $this->pro))->toBeTrue();
 
     FeatureFlag::where('key', 'test_flag')->update(['default_enabled' => false]);
+    $this->service->flushRegistry(); // registry cache must be evicted after direct DB mutation
     expect($this->service->enabled('test_flag', $this->pro))->toBeFalse();
 });
 
