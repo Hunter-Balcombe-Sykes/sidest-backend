@@ -71,24 +71,34 @@ class MfaController extends Controller
     }
 
     /**
-     * Inline copy of BasePolicy::requiresFreshAal2 — see comment on
-     * destroy() above for why it's not delegated to a policy.
+     * Inline copy of BasePolicy::requiresFreshAal2 — see destroy() comment
+     * for why it's not delegated to a policy.
+     *
+     * Uses max(timestamp) across all MFA-method amr entries so the result is
+     * order-independent (Supabase emits amr chronologically, oldest-first).
      */
     private function requiresFreshAal2(Request $request, int $maxAgeSeconds): GateResponse
     {
         $amr = $request->attributes->get('supabase_amr', []);
         $mfaMethods = ['totp', 'phone', 'webauthn'];
 
+        $mostRecentMfaTs = null;
         foreach ($amr as $entry) {
             $method = $entry['method'] ?? null;
             if (in_array($method, $mfaMethods, true)) {
-                $age = time() - (int) ($entry['timestamp'] ?? 0);
-                return $age <= $maxAgeSeconds
-                    ? GateResponse::allow()
-                    : GateResponse::denyWithStatus(401, 'Recent MFA verification required');
+                $ts = (int) ($entry['timestamp'] ?? 0);
+                if ($mostRecentMfaTs === null || $ts > $mostRecentMfaTs) {
+                    $mostRecentMfaTs = $ts;
+                }
             }
         }
 
-        return GateResponse::denyWithStatus(401, 'Recent MFA verification required');
+        if ($mostRecentMfaTs === null) {
+            return GateResponse::denyWithStatus(401, 'Recent MFA verification required');
+        }
+
+        return (time() - $mostRecentMfaTs) <= $maxAgeSeconds
+            ? GateResponse::allow()
+            : GateResponse::denyWithStatus(401, 'Recent MFA verification required');
     }
 }

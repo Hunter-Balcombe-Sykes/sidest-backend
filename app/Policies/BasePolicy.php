@@ -59,9 +59,10 @@ abstract class BasePolicy
      *
      * AAL stays sticky at aal2 for the life of the session (Supabase doesn't
      * downgrade it on token refresh), so we have to inspect the amr timeline
-     * to enforce "verify recently". The amr array is ordered most-recent-first
-     * per Supabase docs; we scan for the first mfa-method entry and compare
-     * its timestamp to now.
+     * to enforce "verify recently". We scan all entries, take the max
+     * MFA-method timestamp, and compare to now — order-independent so we
+     * stay correct regardless of whether Supabase emits amr oldest-first or
+     * newest-first.
      *
      * @param  int  $maxAgeSeconds  Window. Default in config('partna.mfa.fresh_window_seconds').
      */
@@ -71,17 +72,23 @@ abstract class BasePolicy
         $amr = request()->attributes->get('supabase_amr', []);
         $mfaMethods = ['totp', 'phone', 'webauthn'];
 
+        $mostRecentMfaTs = null;
         foreach ($amr as $entry) {
             $method = $entry['method'] ?? null;
             if (in_array($method, $mfaMethods, true)) {
-                $age = time() - (int) ($entry['timestamp'] ?? 0);
-
-                return $age <= $maxAgeSeconds
-                    ? Response::allow()
-                    : Response::denyWithStatus(401, 'Recent MFA verification required');
+                $ts = (int) ($entry['timestamp'] ?? 0);
+                if ($mostRecentMfaTs === null || $ts > $mostRecentMfaTs) {
+                    $mostRecentMfaTs = $ts;
+                }
             }
         }
 
-        return Response::denyWithStatus(401, 'Recent MFA verification required');
+        if ($mostRecentMfaTs === null) {
+            return Response::denyWithStatus(401, 'Recent MFA verification required');
+        }
+
+        return (time() - $mostRecentMfaTs) <= $maxAgeSeconds
+            ? Response::allow()
+            : Response::denyWithStatus(401, 'Recent MFA verification required');
     }
 }

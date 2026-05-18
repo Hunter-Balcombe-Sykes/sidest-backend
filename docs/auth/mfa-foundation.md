@@ -73,7 +73,7 @@ Use for high-sensitivity actions where a stale `aal2` token is insufficient.
 
 Requires fresh-AAL2 (60s window, overrides the default 300s). Calls `SupabaseAdminService::unenrollMfaFactor()` which hits the Supabase Admin API. Records an `unenroll` event to `core.auth_factor_events`.
 
-Returns `204` on success, `502` if Supabase Admin API fails.
+Returns `200 {"ok": true}` on success, `502` if Supabase Admin API fails.
 
 ## Supabase Auth Hook: MFA Verification
 

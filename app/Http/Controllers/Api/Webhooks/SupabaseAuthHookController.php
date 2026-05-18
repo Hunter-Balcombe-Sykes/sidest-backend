@@ -48,8 +48,15 @@ class SupabaseAuthHookController extends Controller
         $factorType = $payload['factor_type'] ?? null;
         $valid = (bool) ($payload['valid'] ?? false);
 
-        if ($userId === '' || $factorId === '') {
+        $uuidPattern = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i';
+        if (! preg_match($uuidPattern, $userId) || ! preg_match($uuidPattern, $factorId)) {
             return response()->json(['message' => 'Malformed payload'], 400);
+        }
+
+        // Sanitize factor_type against the DB CHECK constraint allowlist.
+        $allowedFactorTypes = ['totp', 'phone', 'webauthn', 'recovery'];
+        if (! in_array($factorType, $allowedFactorTypes, true)) {
+            $factorType = null;
         }
 
         $ip = $request->ip();
