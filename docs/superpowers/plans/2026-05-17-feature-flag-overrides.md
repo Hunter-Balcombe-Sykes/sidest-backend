@@ -27,7 +27,17 @@
 - Create: `supabase/migrations/202605180000000_create_feature_flags.sql`
 - Create: `supabase/migrations/202605180000001_create_feature_flags_indexes.sql`
 
-- [ ] **Step 1: Write DDL migration**
+> **Audit fixes applied (P1 SCHEMA-1, P2 SCHEMA-2, P3 SCHEMA-3, P3 SCHEMA-4):** FK target is `brand.brand_profiles` (not `brand.brands` — that table does not exist; verified against migration history). `feature_flags` carries `deleted_at` for soft-delete consistency with the rest of Partna. `key` has a DB-level length CHECK matching the app validator. The override list query gets a composite `(flag_key, created_at DESC)` index. **Run Step 1 (verification) BEFORE Step 2 (DDL)** — the prior plan had these reversed.
+
+- [ ] **Step 1: Verify FK target table names**
+
+```bash
+rg -n "CREATE TABLE core\.professionals|CREATE TABLE brand\." supabase/migrations/ -i | head -10
+```
+
+Expected: confirms `core.professionals` exists and identifies the canonical `brand.*` table name. As of 2026-05-18, the correct name is `brand.brand_profiles`; verify it has not been renamed before continuing. If it has been renamed, update every `brand.brand_profiles` reference in Step 2 to match.
+
+- [ ] **Step 2: Write DDL migration**
 
 Create `supabase/migrations/202605180000000_create_feature_flags.sql`:
 
@@ -39,16 +49,19 @@ CREATE TABLE core.feature_flags (
     description text NOT NULL DEFAULT '',
     default_enabled boolean NOT NULL DEFAULT false,
     rollout_percent smallint NOT NULL DEFAULT 0,
+    deleted_at timestamptz NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT feature_flags_rollout_percent_range CHECK (rollout_percent >= 0 AND rollout_percent <= 100)
+    CONSTRAINT feature_flags_rollout_percent_range CHECK (rollout_percent >= 0 AND rollout_percent <= 100),
+    CONSTRAINT feature_flags_key_length CHECK (length(key) <= 128),
+    CONSTRAINT feature_flags_key_format CHECK (key ~ '^[a-z][a-z0-9_]*$')
 );
 
 CREATE TABLE core.feature_flag_overrides (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     flag_key text NOT NULL REFERENCES core.feature_flags(key) ON DELETE CASCADE,
     professional_id uuid NULL REFERENCES core.professionals(id) ON DELETE CASCADE,
-    brand_id uuid NULL REFERENCES brand.brands(id) ON DELETE CASCADE,
+    brand_id uuid NULL REFERENCES brand.brand_profiles(id) ON DELETE CASCADE,
     enabled boolean NOT NULL,
     reason text NULL,
     expires_at timestamptz NULL,
@@ -63,7 +76,9 @@ CREATE TABLE core.feature_flag_overrides (
 COMMIT;
 ```
 
-- [ ] **Step 2: Write indexes migration**
+> The `ON DELETE CASCADE` on `flag_key` is correct *for hard deletes only*. Soft delete is the normal lifecycle (via `deleted_at` + the `SoftDeletes` trait added in Task 2); hard delete remains available for cleanup and cascades sensibly when used.
+
+- [ ] **Step 3: Write indexes migration**
 
 Create `supabase/migrations/202605180000001_create_feature_flags_indexes.sql`:
 
@@ -87,18 +102,16 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS feature_flag_overrides_brand_lookup
 CREATE INDEX CONCURRENTLY IF NOT EXISTS feature_flag_overrides_expires_at
     ON core.feature_flag_overrides (expires_at)
     WHERE expires_at IS NOT NULL;
+
+-- Powers the admin override list query (ORDER BY created_at DESC at the staff endpoint)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS feature_flag_overrides_flag_key_created
+    ON core.feature_flag_overrides (flag_key, created_at DESC);
+
+-- Powers the active-flag scan from the resolver (soft-delete aware)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS feature_flags_active
+    ON core.feature_flags (key)
+    WHERE deleted_at IS NULL;
 ```
-
-> **Note:** If `core.professionals` or `brand.brands` table names differ in this codebase, verify with `\dt core.*` and `\dt brand.*` in Supabase and adjust before applying.
-
-- [ ] **Step 3: Verify table name targets exist**
-
-```bash
-# Confirm referenced tables before pushing migration
-rg -n "create table core\.professionals|create table brand\.brands" supabase/migrations/ -i | head -5
-```
-
-Expected: both tables found. If `brand.brands` is actually `brand.brand_profiles` (or similar), update the FK in Step 1 before pushing.
 
 - [ ] **Step 4: Push to dev Supabase**
 
@@ -136,9 +149,12 @@ namespace App\Models\Core;
 
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class FeatureFlag extends BaseModel
 {
+    use SoftDeletes;
+
     protected $table = 'core.feature_flags';
     protected $primaryKey = 'key';
     public $incrementing = false;
@@ -151,6 +167,7 @@ class FeatureFlag extends BaseModel
         return [
             'default_enabled' => 'boolean',
             'rollout_percent' => 'integer',
+            'deleted_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
@@ -162,6 +179,8 @@ class FeatureFlag extends BaseModel
     }
 }
 ```
+
+> **Audit fix (P2 SCHEMA-2):** `SoftDeletes` added so `DELETE /staff/feature-flags/{key}` sets `deleted_at` instead of hard-destroying the flag and cascading away every override. Hard delete remains available via `forceDelete()` for actual cleanup.
 
 - [ ] **Step 2: Write FeatureFlagOverride model**
 
@@ -332,7 +351,7 @@ Create `tests/Feature/FeatureFlags/ResolverPrecedenceTest.php`:
 ```php
 <?php
 
-use App\Models\Brand\Brand;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional;
@@ -343,7 +362,7 @@ uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
 beforeEach(function () {
     $this->service = app(FeatureFlagService::class);
     $this->pro = Professional::factory()->create();
-    $this->brand = Brand::factory()->for($this->pro)->create();
+    $this->brand = BrandProfile::factory()->for($this->pro)->create();
 });
 
 it('returns global default when no override and no rollout', function () {
@@ -471,7 +490,7 @@ Create `app/Services/FeatureFlags/FeatureFlagService.php`:
 
 namespace App\Services\FeatureFlags;
 
-use App\Models\Brand\Brand;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional;
@@ -652,6 +671,14 @@ Expected: FAIL — caching not wired, `setOverride`/`clearOverride` don't exist.
 
 - [ ] **Step 4: Replace `FeatureFlagService` with cached version**
 
+> **Audit fixes applied to this step:**
+> - **P1 CACHE-1** — Uses `CacheLockService::rememberLocked` (single-flight + SWR) instead of `Cache::remember`. Matches the commerce read-cache pattern that CLAUDE.md / the spec calls out as canonical.
+> - **P2 CACHE-2** — TTL is jittered ±20% per write via `random_int` to prevent synchronized expiry storms.
+> - **P2 LIFE-2** — Precedence logic is extracted into a single `resolveFromArrays()` so the cache path and the degraded DB path share one decision tree; they cannot drift.
+> - **P2 LIFE-3** — `feature_flags.cache_unavailable` log includes `professional_id`, `brand_id`, and `request_id` so Nightwatch can correlate during an incident.
+> - **P2 FF-2 (original audit)** — Overrides for soft-deleted professionals/brands are filtered out at load time. Soft-deleted accounts no longer influence resolution.
+> - **P2 FF-3 (original audit)** — Adds the `allFor()` method that the spec promised but the prior plan omitted.
+
 Replace `app/Services/FeatureFlags/FeatureFlagService.php` entirely with:
 
 ```php
@@ -659,50 +686,73 @@ Replace `app/Services/FeatureFlags/FeatureFlagService.php` entirely with:
 
 namespace App\Services\FeatureFlags;
 
-use App\Models\Brand\Brand;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Models\Core\Professional;
+use App\Services\Cache\CacheLockService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class FeatureFlagService
 {
-    private const CACHE_TTL_SECONDS = 300;
+    private const BASE_TTL_SECONDS = 300;
+    private const TTL_JITTER_SECONDS = 60;
     private const REGISTRY_KEY = 'ff:registry';
 
-    public function enabled(string $key, ?Professional $pro = null, ?Brand $brand = null): bool
+    public function __construct(private CacheLockService $cacheLock)
+    {
+    }
+
+    public function enabled(string $key, ?Professional $pro = null, ?BrandProfile $brand = null): bool
     {
         try {
-            $registry = $this->loadRegistry();
-            $brandOverrides = $brand !== null ? $this->loadBrandOverrides($brand->id) : [];
-            $proOverrides = $pro !== null ? $this->loadProOverrides($pro->id) : [];
+            [$registry, $proOverrides, $brandOverrides] = $this->loadAll($pro, $brand);
+            return $this->resolveFromArrays($key, $registry, $proOverrides, $brandOverrides, $pro);
         } catch (Throwable $e) {
-            Log::warning('feature_flags.cache_unavailable', ['error' => $e->getMessage()]);
+            Log::warning('feature_flags.cache_unavailable', [
+                'error' => $e->getMessage(),
+                'flag_key' => $key,
+                'professional_id' => $pro?->id,
+                'brand_id' => $brand?->id,
+                'request_id' => request()?->header('X-Request-Id'),
+            ]);
             return $this->resolveFromDb($key, $pro, $brand);
         }
+    }
 
-        if (isset($brandOverrides[$key])) {
-            return $brandOverrides[$key];
-        }
-        if (isset($proOverrides[$key])) {
-            return $proOverrides[$key];
-        }
-
-        $flag = $registry[$key] ?? null;
-        if ($flag !== null && $pro !== null && $flag['rollout_percent'] > 0) {
-            $bucket = crc32($key . $pro->id) % 100;
-            if ($bucket < $flag['rollout_percent']) {
-                return true;
+    /**
+     * Return the full ['key' => bool, ...] map for the given scope.
+     * Matches the API surface promised by the spec.
+     */
+    public function allFor(?Professional $pro = null, ?BrandProfile $brand = null): array
+    {
+        try {
+            [$registry, $proOverrides, $brandOverrides] = $this->loadAll($pro, $brand);
+        } catch (Throwable $e) {
+            Log::warning('feature_flags.cache_unavailable', [
+                'error' => $e->getMessage(),
+                'method' => 'allFor',
+                'professional_id' => $pro?->id,
+                'brand_id' => $brand?->id,
+                'request_id' => request()?->header('X-Request-Id'),
+            ]);
+            // Degrade to per-key DB resolution rather than empty array.
+            $result = [];
+            foreach (array_keys($registry ?? []) as $k) {
+                $result[$k] = $this->resolveFromDb($k, $pro, $brand);
             }
+            return $result;
         }
 
-        if ($flag !== null) {
-            return $flag['default_enabled'];
+        $result = [];
+        foreach (array_keys($registry) as $k) {
+            $result[$k] = $this->resolveFromArrays($k, $registry, $proOverrides, $brandOverrides, $pro);
         }
-        return (bool) config('partna.features.' . $key, false);
+        return $result;
     }
 
     public function setOverride(
@@ -758,64 +808,137 @@ class FeatureFlagService
         $this->flushRegistry();
     }
 
-    private function forgetPro(string $proId): void
+    public function forgetPro(string $proId): void
     {
         Cache::forget("ff:pro:{$proId}");
     }
 
-    private function forgetBrand(string $brandId): void
+    public function forgetBrand(string $brandId): void
     {
         Cache::forget("ff:brand:{$brandId}");
     }
 
+    /**
+     * @return array{0: array<string, array{default_enabled: bool, rollout_percent: int}>, 1: array<string, bool>, 2: array<string, bool>}
+     */
+    private function loadAll(?Professional $pro, ?BrandProfile $brand): array
+    {
+        $registry = $this->loadRegistry();
+        $proOverrides = $pro !== null ? $this->loadProOverrides($pro->id) : [];
+        $brandOverrides = $brand !== null ? $this->loadBrandOverrides($brand->id) : [];
+        return [$registry, $proOverrides, $brandOverrides];
+    }
+
+    /**
+     * Single decision tree shared by both cached + degraded-DB paths.
+     */
+    private function resolveFromArrays(
+        string $key,
+        array $registry,
+        array $proOverrides,
+        array $brandOverrides,
+        ?Professional $pro,
+    ): bool {
+        if (isset($brandOverrides[$key])) {
+            return $brandOverrides[$key];
+        }
+        if (isset($proOverrides[$key])) {
+            return $proOverrides[$key];
+        }
+        $flag = $registry[$key] ?? null;
+        if ($flag !== null && $pro !== null && $flag['rollout_percent'] > 0) {
+            if ((crc32($key . $pro->id) % 100) < $flag['rollout_percent']) {
+                return true;
+            }
+        }
+        if ($flag !== null) {
+            return $flag['default_enabled'];
+        }
+        return (bool) config('partna.features.' . $key, false);
+    }
+
+    private function jitteredTtl(): int
+    {
+        return self::BASE_TTL_SECONDS + random_int(-self::TTL_JITTER_SECONDS, self::TTL_JITTER_SECONDS);
+    }
+
     private function loadRegistry(): array
     {
-        return Cache::remember(self::REGISTRY_KEY, self::CACHE_TTL_SECONDS, function (): array {
-            return FeatureFlag::all()
-                ->mapWithKeys(fn ($f) => [$f->key => [
-                    'default_enabled' => (bool) $f->default_enabled,
-                    'rollout_percent' => (int) $f->rollout_percent,
-                ]])
-                ->all();
-        });
+        return $this->cacheLock->rememberLocked(
+            self::REGISTRY_KEY,
+            $this->jitteredTtl(),
+            function (): array {
+                return FeatureFlag::query()
+                    ->whereNull('deleted_at')
+                    ->get()
+                    ->mapWithKeys(fn ($f) => [$f->key => [
+                        'default_enabled' => (bool) $f->default_enabled,
+                        'rollout_percent' => (int) $f->rollout_percent,
+                    ]])
+                    ->all();
+            },
+        );
     }
 
     private function loadProOverrides(string $proId): array
     {
-        return Cache::remember("ff:pro:{$proId}", self::CACHE_TTL_SECONDS, function () use ($proId): array {
-            return FeatureFlagOverride::query()
-                ->where('professional_id', $proId)
-                ->whereNull('brand_id')
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->get()
-                ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
-                ->all();
-        });
+        return $this->cacheLock->rememberLocked(
+            "ff:pro:{$proId}",
+            $this->jitteredTtl(),
+            function () use ($proId): array {
+                // Filter out overrides for soft-deleted professionals via EXISTS subquery.
+                return FeatureFlagOverride::query()
+                    ->where('professional_id', $proId)
+                    ->whereNull('brand_id')
+                    ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                    ->whereExists(fn ($q) => $q->select(DB::raw(1))
+                        ->from('core.professionals')
+                        ->whereColumn('core.professionals.id', 'core.feature_flag_overrides.professional_id')
+                        ->whereNull('core.professionals.deleted_at'))
+                    ->get()
+                    ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
+                    ->all();
+            },
+        );
     }
 
     private function loadBrandOverrides(string $brandId): array
     {
-        return Cache::remember("ff:brand:{$brandId}", self::CACHE_TTL_SECONDS, function () use ($brandId): array {
-            return FeatureFlagOverride::query()
-                ->where('brand_id', $brandId)
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->get()
-                ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
-                ->all();
-        });
+        return $this->cacheLock->rememberLocked(
+            "ff:brand:{$brandId}",
+            $this->jitteredTtl(),
+            function () use ($brandId): array {
+                return FeatureFlagOverride::query()
+                    ->where('brand_id', $brandId)
+                    ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                    ->whereExists(fn ($q) => $q->select(DB::raw(1))
+                        ->from('brand.brand_profiles')
+                        ->whereColumn('brand.brand_profiles.id', 'core.feature_flag_overrides.brand_id')
+                        ->whereNull('brand.brand_profiles.deleted_at'))
+                    ->get()
+                    ->mapWithKeys(fn ($o) => [$o->flag_key => (bool) $o->enabled])
+                    ->all();
+            },
+        );
     }
 
-    private function resolveFromDb(string $key, ?Professional $pro, ?Brand $brand): bool
+    /**
+     * Degraded path used when the cache layer throws.
+     * Reads directly from the DB, then delegates to the same decision tree as enabled().
+     */
+    private function resolveFromDb(string $key, ?Professional $pro, ?BrandProfile $brand): bool
     {
-        if ($brand !== null) {
-            $row = FeatureFlagOverride::where('flag_key', $key)
-                ->where('brand_id', $brand->id)
-                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
-                ->first();
-            if ($row !== null) {
-                return (bool) $row->enabled;
-            }
-        }
+        $registry = FeatureFlag::query()
+            ->whereNull('deleted_at')
+            ->where('key', $key)
+            ->get()
+            ->mapWithKeys(fn ($f) => [$f->key => [
+                'default_enabled' => (bool) $f->default_enabled,
+                'rollout_percent' => (int) $f->rollout_percent,
+            ]])
+            ->all();
+
+        $proOverrides = [];
         if ($pro !== null) {
             $row = FeatureFlagOverride::where('flag_key', $key)
                 ->where('professional_id', $pro->id)
@@ -823,21 +946,68 @@ class FeatureFlagService
                 ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
                 ->first();
             if ($row !== null) {
-                return (bool) $row->enabled;
+                $proOverrides[$key] = (bool) $row->enabled;
             }
         }
-        $flag = FeatureFlag::find($key);
-        if ($flag !== null && $pro !== null && $flag->rollout_percent > 0) {
-            if ((crc32($key . $pro->id) % 100) < $flag->rollout_percent) {
-                return true;
+
+        $brandOverrides = [];
+        if ($brand !== null) {
+            $row = FeatureFlagOverride::where('flag_key', $key)
+                ->where('brand_id', $brand->id)
+                ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+                ->first();
+            if ($row !== null) {
+                $brandOverrides[$key] = (bool) $row->enabled;
             }
         }
-        if ($flag !== null) {
-            return (bool) $flag->default_enabled;
-        }
-        return (bool) config('partna.features.' . $key, false);
+
+        return $this->resolveFromArrays($key, $registry, $proOverrides, $brandOverrides, $pro);
     }
 }
+```
+
+> **Note on `BrandProfile`:** the model is at `app/Models/Brand/BrandProfile.php` (verify with `ls app/Models/Brand/`). If the class is actually named `Brand` in this codebase, swap the import and parameter type accordingly — but the underlying table is `brand.brand_profiles` regardless.
+
+- [ ] **Step 4b: Write the `allFor()` test**
+
+Create `tests/Feature/FeatureFlags/AllForTest.php`:
+
+```php
+<?php
+
+use App\Models\Core\Professional\BrandProfile;
+use App\Models\Core\FeatureFlag;
+use App\Models\Core\FeatureFlagOverride;
+use App\Models\Core\Professional;
+use App\Services\FeatureFlags\FeatureFlagService;
+use Illuminate\Support\Facades\Cache;
+
+uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
+
+beforeEach(function () {
+    Cache::flush();
+    $this->service = app(FeatureFlagService::class);
+});
+
+it('returns global defaults map when no pro is passed', function () {
+    FeatureFlag::create(['key' => 'a', 'default_enabled' => true, 'rollout_percent' => 0]);
+    FeatureFlag::create(['key' => 'b', 'default_enabled' => false, 'rollout_percent' => 0]);
+
+    expect($this->service->allFor())->toBe(['a' => true, 'b' => false]);
+});
+
+it('applies pro and brand overrides correctly in the map', function () {
+    $pro = Professional::factory()->create();
+    $brand = BrandProfile::factory()->for($pro)->create();
+
+    FeatureFlag::create(['key' => 'a', 'default_enabled' => false, 'rollout_percent' => 0]);
+    FeatureFlag::create(['key' => 'b', 'default_enabled' => true, 'rollout_percent' => 0]);
+
+    FeatureFlagOverride::create(['flag_key' => 'a', 'professional_id' => $pro->id, 'enabled' => true]);
+    FeatureFlagOverride::create(['flag_key' => 'b', 'brand_id' => $brand->id, 'enabled' => false]);
+
+    expect($this->service->allFor($pro, $brand))->toBe(['a' => true, 'b' => false]);
+});
 ```
 
 - [ ] **Step 5: Run — expect pass**
@@ -895,7 +1065,7 @@ Create `app/helpers.php`:
 ```php
 <?php
 
-use App\Models\Brand\Brand;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Professional;
 use App\Services\FeatureFlags\FeatureFlagService;
 
@@ -1110,7 +1280,7 @@ class CreateOverrideRequest extends FormRequest
     {
         return [
             'professional_id' => ['required_without:brand_id', 'nullable', 'uuid', 'exists:core.professionals,id'],
-            'brand_id' => ['required_without:professional_id', 'nullable', 'uuid', 'exists:brand.brands,id'],
+            'brand_id' => ['required_without:professional_id', 'nullable', 'uuid', 'exists:brand.brand_profiles,id'],
             'enabled' => ['required', 'boolean'],
             'reason' => ['nullable', 'string', 'max:500'],
             'expires_at' => ['nullable', 'date', 'after:now'],
@@ -1216,13 +1386,13 @@ git commit -m "feat(feature-flags): api resources"
 - Create: `app/Http/Controllers/Api/Staff/FeatureFlag/StaffFeatureFlagController.php`
 - Create: `app/Http/Controllers/Api/Staff/FeatureFlag/StaffFeatureFlagOverrideController.php`
 
-- [ ] **Step 1: Read one existing staff controller for shape**
+- [ ] **Step 1: Confirm the staff-attribute key**
 
 ```bash
-cat app/Http/Controllers/Api/Staff/ProfessionalSiteManagement/StaffCommissionAdjustmentController.php
+rg -n "attributes->get\('partna_staff'\)" app/Http/Controllers/Api/Staff/ | head -3
 ```
 
-Note: how the authenticated professional is resolved (CLAUDE.md says `Auth::user()` is null in this app — there's a context middleware that provides it). Use whatever the existing controllers use (`$request->user('professional')` or similar — inspect to confirm).
+Expected: confirms every existing staff controller uses `$request->attributes->get('partna_staff')` to resolve the authenticated staff actor. **This is the only correct key.** Under Supabase JWT auth, `Auth::user()` and `$request->user()` always return null — using them as fallbacks creates a silent auth bypass (`Gate::forUser(null)` passes every policy check). The controllers below use `partna_staff` directly with a hard 401 if it is missing — no fallbacks.
 
 - [ ] **Step 2: Implement flag controller**
 
@@ -1291,15 +1461,14 @@ class StaffFeatureFlagController extends Controller
 
     private function resolveStaff(Request $request)
     {
-        // Match the existing pattern used in staff controllers.
-        // Most staff controllers use $request->user('professional') or a context middleware.
-        // Adjust this line after reading StaffCommissionAdjustmentController in Step 1.
-        return $request->attributes->get('professional') ?? $request->user();
+        $staff = $request->attributes->get('partna_staff');
+        abort_if($staff === null, 401, 'Unauthenticated');
+        return $staff;
     }
 }
 ```
 
-> **Note:** the `resolveStaff` helper is a stand-in. Replace it with whatever idiom the existing staff controllers use (likely a trait or middleware-provided attribute). Do this in Step 1 before writing this file.
+> **Audit fix (P1 SEC-1):** uses the canonical `partna_staff` attribute key with a hard 401 on missing. **Never** fall back to `$request->user()` — under Supabase JWT it returns null, and `authorizeForUser(null, ...)` silently passes every policy check (`Gate::forUser(null)` is a known Laravel-Gate quirk). Fail closed, always.
 
 - [ ] **Step 3: Implement override controller**
 
@@ -1333,7 +1502,8 @@ class StaffFeatureFlagOverrideController extends Controller
         $flag = FeatureFlag::findOrFail($key);
         $this->authorizeForUser($pro, 'manage', $flag);
 
-        $overrides = $flag->overrides()->orderBy('created_at', 'desc')->get();
+        // Audit fix (P3 SCALE-3): paginate to bound response size as overrides accumulate.
+        $overrides = $flag->overrides()->orderBy('created_at', 'desc')->paginate(50);
         return FeatureFlagOverrideResource::collection($overrides)->response();
     }
 
@@ -1382,7 +1552,9 @@ class StaffFeatureFlagOverrideController extends Controller
 
     private function resolveStaff(Request $request)
     {
-        return $request->attributes->get('professional') ?? $request->user();
+        $staff = $request->attributes->get('partna_staff');
+        abort_if($staff === null, 401, 'Unauthenticated');
+        return $staff;
     }
 }
 ```
@@ -1599,7 +1771,10 @@ use App\Models\Core\Professional;
 uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 it('deletes expired overrides, keeps active ones', function () {
+    // Audit fix (P2 FF-4 from targeted run): use real Brand/Professional factories,
+    // not synthetic UUIDs — Postgres enforces FK constraints and SQLite may too.
     $pro = Professional::factory()->create();
+    $brand = \App\Models\Core\Professional\BrandProfile::factory()->for($pro)->create();
     FeatureFlag::create(['key' => 'x', 'default_enabled' => false, 'rollout_percent' => 0]);
 
     $expired = FeatureFlagOverride::create([
@@ -1607,7 +1782,7 @@ it('deletes expired overrides, keeps active ones', function () {
         'expires_at' => now()->subMinute(),
     ]);
     $active = FeatureFlagOverride::create([
-        'flag_key' => 'x', 'brand_id' => '00000000-0000-0000-0000-000000000001',
+        'flag_key' => 'x', 'brand_id' => $brand->id,
         'enabled' => true, 'expires_at' => now()->addHour(),
     ]);
     $permanent = FeatureFlagOverride::create([
