@@ -84,6 +84,10 @@ class AnalyticsService
             'professional_id' => $affiliate->id,
         ]);
 
+        $uniqueVisitors = $this->windowedDistinctCount('analytics.site_visits', 'visitor_id', $bounds, [
+            'professional_id' => $affiliate->id,
+        ]);
+
         $orders = $this->windowedSum('commerce.orders', 'occurred_at', 'COUNT(*)', $bounds, [
             'affiliate_professional_id' => $affiliate->id,
         ], excludeStatuses: Order::EXCLUDED_FROM_AGGREGATES);
@@ -104,11 +108,12 @@ class AnalyticsService
 
         // Conversion rate = orders / views * 100. Abandoned cart rate = (sessions - orders) / sessions * 100.
         // Both computed per window from the raw counts above; the rates aren't stored, just derived.
-        $conversionRate = $this->computeRate($orders, $views, multiplier: 100);
+        $conversionRate = $this->computeRate($orders, $uniqueVisitors, multiplier: 100);
         $abandonedCart = $this->computeAbandonedCartRate($cartSessions, $orders);
 
         return [
             'views' => $views,
+            'unique_visitors' => $uniqueVisitors,
             'orders_count' => $orders,
             'total_sales_cents' => $sales,
             'total_commissions_cents' => $commissions,
@@ -150,8 +155,9 @@ class AnalyticsService
         $brandViews = $this->brandWindowedViews($brandId, $bounds);
 
         $cartSessions = $this->brandWindowedCartSessions($brandId, $bounds);
+        $brandUniqueVisitors = $this->brandWindowedUniqueVisitors($brandId, $bounds);
 
-        $avgConversionRate = $this->computeRate($orders, $brandViews, multiplier: 100);
+        $avgConversionRate = $this->computeRate($orders, $brandUniqueVisitors, multiplier: 100);
         $avgAbandonedCart = $this->computeAbandonedCartRate($cartSessions, $orders);
 
         return [
@@ -159,6 +165,7 @@ class AnalyticsService
             'total_sales_cents' => $sales,
             'total_commissions_cents' => $commissions,
             'total_views' => $brandViews,
+            'unique_visitors' => $brandUniqueVisitors,
             'cart_sessions' => $cartSessions,
             'avg_conversion_rate_pct' => $avgConversionRate,
             'avg_abandoned_cart_rate_pct' => $avgAbandonedCart,
@@ -262,6 +269,31 @@ class AnalyticsService
     }
 
     /**
+     * COUNT DISTINCT across the six windows — one query per window because
+     * COUNT(DISTINCT ...) doesn't compose into a CASE WHEN aggregate.
+     *
+     * @param  array<string, ?string>  $bounds
+     * @param  array<string, mixed>  $where
+     * @return array<string, int>
+     */
+    private function windowedDistinctCount(string $table, string $distinctColumn, array $bounds, array $where): array
+    {
+        $result = [];
+        foreach (self::WINDOWS as $w) {
+            $query = DB::table($table)->whereNotNull($distinctColumn);
+            foreach ($where as $col => $val) {
+                $query->where($col, $val);
+            }
+            if ($bounds[$w] !== null) {
+                $query->where('occurred_at', '>=', $bounds[$w]);
+            }
+            $result[$w] = (int) $query->distinct()->count($distinctColumn);
+        }
+
+        return $result;
+    }
+
+    /**
      * Cart sessions = COUNT DISTINCT session_id from analytics.cart_events with event_type=checkout_start.
      * Need a separate query per window because COUNT DISTINCT doesn't compose into FILTER cleanly.
      *
@@ -343,6 +375,38 @@ class AnalyticsService
                 $query->where('occurred_at', '>=', $bounds[$w]);
             }
             $result[$w] = (int) $query->count();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Brand-level unique visitors — COUNT DISTINCT visitor_id from site_visits across all
+     * affiliates promoting this brand. Same affiliate-set lookup as brandWindowedViews.
+     *
+     * @param  array<string, ?string>  $bounds
+     * @return array<string, int>
+     */
+    private function brandWindowedUniqueVisitors(string $brandId, array $bounds): array
+    {
+        $affiliateIds = DB::table('commerce.brand_affiliate_rollup')
+            ->where('brand_professional_id', $brandId)
+            ->distinct()
+            ->pluck('affiliate_professional_id');
+
+        if ($affiliateIds->isEmpty()) {
+            return array_fill_keys(self::WINDOWS, 0);
+        }
+
+        $result = [];
+        foreach (self::WINDOWS as $w) {
+            $query = DB::table('analytics.site_visits')
+                ->whereIn('professional_id', $affiliateIds)
+                ->whereNotNull('visitor_id');
+            if ($bounds[$w] !== null) {
+                $query->where('occurred_at', '>=', $bounds[$w]);
+            }
+            $result[$w] = (int) $query->distinct()->count('visitor_id');
         }
 
         return $result;

@@ -86,8 +86,8 @@ class BrandCommerceAnalyticsController extends ApiController
             $totals['avg_visitor_conversion_rate'] = $totalUniqueVisitors > 0
                 ? round(((int) ($totals['orders_count'] ?? 0) / $totalUniqueVisitors) * 100, 2)
                 : 0.0;
-            $totals['avg_abandoned_cart_rate'] = $totalCartAdds > 0
-                ? round((max(0, $totalCartAdds - (int) ($totals['orders_count'] ?? 0)) / $totalCartAdds) * 100, 2)
+            $totals['avg_abandoned_cart_rate'] = $totalCheckouts > 0
+                ? round((max(0, $totalCheckouts - (int) ($totals['orders_count'] ?? 0)) / $totalCheckouts) * 100, 2)
                 : 0.0;
 
             // ── Per-affiliate breakdown from commerce.brand_affiliate_rollup ─
