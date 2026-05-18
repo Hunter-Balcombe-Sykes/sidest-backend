@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Professional\Account\MfaController;
 use App\Http\Controllers\Api\Professional\Account\ProfessionalAccountDeletionController;
 use App\Http\Controllers\Api\Professional\Account\ProfessionalController;
 use App\Http\Controllers\Api\Professional\Account\ProfessionalDataExportController;
@@ -87,6 +88,14 @@ Route::middleware(['supabase.jwt', 'require.email_verified', 'current.pro', Enfo
         Route::post('/me/data-export', [ProfessionalDataExportController::class, 'store'])
             ->withoutMiddleware([EnforcePendingDeletionReadOnly::class])
             ->middleware('throttle:1,1440');
+        // MFA self-service — fresh AAL2 enforced inside the controller (tighter
+        // 60s window than session-level aal2). No require.aal2 middleware here.
+        Route::prefix('account/mfa')->group(function () {
+            Route::delete('/factors/{factorId}', [MfaController::class, 'destroy'])
+                ->whereUuid('factorId')
+                ->name('account.mfa.factors.destroy');
+        });
+
         // Brand-affiliate management is brand-only; gating moved to middleware
         // so the role check is centralized (audit fix #PH4-3). BrandPartnerController
         // stays outside this group — it's the affiliate-side mirror endpoint.

@@ -84,6 +84,38 @@ class SupabaseAdminService
     }
 
     /**
+     * Remove an MFA factor from a Supabase user via the Admin API.
+     *
+     * Endpoint: DELETE /auth/v1/admin/users/{user_id}/factors/{factor_id}
+     * Auth: service role key.
+     *
+     * Throws \RuntimeException on non-2xx response so the controller can
+     * map to a 502.
+     */
+    public function unenrollMfaFactor(string $supabaseUserId, string $factorId): void
+    {
+        $baseUrl = rtrim((string) config('supabase.admin.base_url'), '/');
+        $serviceRoleKey = (string) config('supabase.service_role_key');
+
+        if ($baseUrl === '' || $serviceRoleKey === '') {
+            throw new RuntimeException('Supabase admin config missing');
+        }
+
+        $response = Http::timeout(5)
+            ->withHeaders([
+                'apikey' => $serviceRoleKey,
+                'Authorization' => 'Bearer '.$serviceRoleKey,
+            ])
+            ->delete("{$baseUrl}/users/{$supabaseUserId}/factors/{$factorId}");
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Supabase factor unenroll failed: HTTP {$response->status()} body={$response->body()}"
+            );
+        }
+    }
+
+    /**
      * @return array<string, string>
      */
     private function headers(): array
