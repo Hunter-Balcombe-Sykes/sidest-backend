@@ -18,7 +18,20 @@ use Throwable;
 //
 // Captures actor, target, route, method, status, route bindings, IP, UA.
 // Deliberately does NOT capture request body — body-detail forensics is opt-in
-// per controller via StaffAuditService::record(['payload_summary' => [...]]).
+// per controller. Controllers wanting payload-summary enrichment should call
+// StaffAuditService::record() directly with named parameters, e.g.:
+//   $audit->record(
+//       staff: $staff,
+//       impersonator: null,
+//       professional: $pro,
+//       route: $request->route()?->getName() ?? 'unknown',
+//       httpMethod: $request->method(),
+//       statusCode: 200,
+//       payloadSummary: ['changed_fields' => array_keys($changes)],
+//       ip: $request->ip(),
+//       userAgent: $request->userAgent(),
+//   );
+// payloadSummary is the 7th positional parameter, not a wrapper array bag.
 class RecordStaffAuditEntry
 {
     private const WRITE_METHODS = ['POST', 'PATCH', 'PUT', 'DELETE'];
@@ -50,7 +63,7 @@ class RecordStaffAuditEntry
             // so the service can still record the professional_id FK. Handle is null
             // because we only have the UUID — snapshot will be null, which is fine.
             if ($professional === null && $professionalIdFromString !== null) {
-                $professional = new Professional();
+                $professional = new Professional;
                 $professional->id = $professionalIdFromString;
             }
 

@@ -291,14 +291,26 @@ class FeatureFlagService
         return (bool) config('partna.features.'.$key, false);
     }
 
-    private function jitteredTtl(?Carbon $nearestExpiry = null): int
+    /**
+     * Compute the cache TTL, optionally capped by an override's expires_at.
+     *
+     * Returns an int (seconds) for the normal path so CacheLockService applies its
+     * ±20% jitter. When an override's expires_at is sooner than the base TTL, returns
+     * the Carbon deadline directly — CacheLockService::writeWithJitter honours
+     * DateTimeInterface TTLs verbatim (no re-jitter), so the primary key can never
+     * be served past expires_at. Without this hand-off, the int path would be
+     * re-jittered ±20% and could leak ~20% past the cap.
+     */
+    private function jitteredTtl(?Carbon $nearestExpiry = null): Carbon|int
     {
         $base = self::BASE_TTL_SECONDS + random_int(-self::TTL_JITTER_SECONDS, self::TTL_JITTER_SECONDS);
 
         if ($nearestExpiry !== null) {
             $secondsUntilExpiry = max(1, (int) $nearestExpiry->diffInSeconds(now(), false) * -1);
 
-            return min($base, $secondsUntilExpiry);
+            if ($secondsUntilExpiry < $base) {
+                return $nearestExpiry;
+            }
         }
 
         return $base;
@@ -332,6 +344,18 @@ class FeatureFlagService
      */
     private function loadProOverrides(string $proId): array
     {
+        $key = "ff:pro:{$proId}";
+
+        // Warm-read fast path: skip the MIN(expires_at) query when the primary
+        // cache key is hot. The MIN is only needed to cap the TTL on a write,
+        // which happens on miss/SWR. rememberLocked() will re-check Cache::get
+        // internally — a second Redis GET (~0.1ms) is cheaper than a Postgres
+        // round-trip on every warm read.
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
         // Determine nearest expiry before entering the lock so the TTL can be
         // capped — prevents overrides from being served past their expires_at.
         $nearestExpiry = FeatureFlagOverride::query()
@@ -344,7 +368,7 @@ class FeatureFlagService
         $nearestExpiry = $nearestExpiry ? Carbon::parse($nearestExpiry) : null;
 
         return $this->cacheLock->rememberLocked(
-            "ff:pro:{$proId}",
+            $key,
             $this->jitteredTtl($nearestExpiry),
             function () use ($proId): array {
                 $query = FeatureFlagOverride::query()
@@ -379,6 +403,14 @@ class FeatureFlagService
      */
     private function loadBrandOverrides(string $brandId): array
     {
+        $key = "ff:brand:{$brandId}";
+
+        // Warm-read fast path — see loadProOverrides for rationale.
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
         $nearestExpiry = FeatureFlagOverride::query()
             ->where('brand_id', $brandId)
             ->whereNotNull('expires_at')
@@ -388,7 +420,7 @@ class FeatureFlagService
         $nearestExpiry = $nearestExpiry ? Carbon::parse($nearestExpiry) : null;
 
         return $this->cacheLock->rememberLocked(
-            "ff:brand:{$brandId}",
+            $key,
             $this->jitteredTtl($nearestExpiry),
             function () use ($brandId): array {
                 $query = FeatureFlagOverride::query()

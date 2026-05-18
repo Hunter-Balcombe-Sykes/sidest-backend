@@ -27,6 +27,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Singleton so the request-scoped $requestCache memo actually persists
+        // across the middleware / controller / nested service calls within a
+        // single request. Without this, app(FeatureFlagService::class) resolves
+        // a fresh instance on every helper call and the memo is always empty.
+        $this->app->singleton(\App\Services\FeatureFlags\FeatureFlagService::class);
+
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyAdminClient::class);
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyBudgetTracker::class);
         $this->app->singleton(\App\Services\Shopify\Client\ShopifyCostTracker::class);

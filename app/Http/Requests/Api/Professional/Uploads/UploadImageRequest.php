@@ -63,9 +63,11 @@ class UploadImageRequest extends BaseFormRequest
                 return;
             }
 
-            if ($hasVideo && ! config('partna.video_uploads_enabled', false)) {
-                $v->errors()->add('video', 'Video uploads are not currently enabled.');
-            }
+            // Video gate lives in the controller (per-tenant feature flag —
+            // FeatureFlagService::enabled('video_uploads', $pro)). The Form Request
+            // no longer enforces a global env kill-switch here; that path was
+            // shadowing the per-tenant flag and 422-ing every video upload when
+            // the env default (false) was unchanged.
 
             if ($hasImage) {
                 $this->assertImageMimeBytes($this->file('image'), $v, 'image');

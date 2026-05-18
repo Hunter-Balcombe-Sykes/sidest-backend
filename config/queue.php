@@ -97,8 +97,8 @@ return [
         'redis_gdpr' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
-            'queue' => env('GDPR_QUEUE', 'gdpr'),
-            'retry_after' => (int) env('GDPR_QUEUE_RETRY_AFTER', 660),
+            'queue' => env('PARTNA_GDPR_QUEUE', env('GDPR_QUEUE', 'gdpr')),
+            'retry_after' => (int) env('PARTNA_GDPR_QUEUE_RETRY_AFTER', env('GDPR_QUEUE_RETRY_AFTER', 660)),
             'block_for' => null,
             'after_commit' => false,
         ],
