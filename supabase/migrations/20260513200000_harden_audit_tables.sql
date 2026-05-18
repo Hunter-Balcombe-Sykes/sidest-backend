@@ -58,6 +58,12 @@ ALTER TABLE core.wallet_currency_switch_audit
 ALTER TABLE core.wallet_currency_switch_audit
     DROP CONSTRAINT IF EXISTS wallet_currency_switch_audit_professional_id_fkey;
 
+-- Safe deviation from CONVENTIONS.md §4 (always NOT VALID first): this table holds
+-- well under 1K rows at migration time (wallet-currency switch is a rare per-tenant
+-- operation), so the ACCESS EXCLUSIVE window during full-row validation completes
+-- in microseconds. The NOT VALID / VALIDATE CONSTRAINT split is unnecessary here.
+-- DO NOT copy this pattern onto commerce.* hot tables — for orders / movements /
+-- rollups, follow §4 (NOT VALID first, VALIDATE in a separate transaction).
 ALTER TABLE core.wallet_currency_switch_audit
     ADD CONSTRAINT wallet_currency_switch_audit_professional_id_fkey
     FOREIGN KEY (professional_id) REFERENCES core.professionals(id) ON DELETE SET NULL;
@@ -108,6 +114,11 @@ ALTER TABLE core.brand_status_history
 ALTER TABLE core.brand_status_history
     DROP CONSTRAINT IF EXISTS brand_status_history_professional_id_fkey;
 
+-- Safe deviation from CONVENTIONS.md §4 — see equivalent block above for the
+-- wallet_currency_switch_audit FK. brand_status_history is also a small audit table
+-- (rows are appended on brand-state transitions, not per-request), so the full
+-- ACCESS EXCLUSIVE validation completes in microseconds. Same warning: do not
+-- copy onto hot commerce.* tables.
 ALTER TABLE core.brand_status_history
     ADD CONSTRAINT brand_status_history_professional_id_fkey
     FOREIGN KEY (professional_id) REFERENCES core.professionals(id) ON DELETE SET NULL;

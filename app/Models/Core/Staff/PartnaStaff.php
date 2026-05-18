@@ -7,6 +7,16 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 // V2: Internal Partna staff member. Linked to a Supabase auth user; role-based access for admin operations.
+//
+// Mass-assignment posture (SEC-1):
+//   `role` is intentionally NOT $fillable. It's an admin-only state transition,
+//   not a user-settable attribute. Use promoteToAdmin() / demoteToSupport() —
+//   never $staff->update(['role' => ...]) from a request-derived array.
+//
+// Serialization posture (SEC-2):
+//   primary_email, name, phone are hidden so toArray() / toJson() / log dumps
+//   never broadcast staff identity. Any staff-facing endpoint that legitimately
+//   needs these fields must expose them via a dedicated StaffResource.
 class PartnaStaff extends BaseModel
 {
     use HasFactory, HasUuids;
@@ -23,10 +33,12 @@ class PartnaStaff extends BaseModel
 
     protected $hidden = [
         'auth_user_id',
+        'primary_email',
+        'name',
+        'phone',
     ];
 
     protected $fillable = [
-        'role',
         'primary_email',
         'name',
         'phone',
@@ -40,5 +52,29 @@ class PartnaStaff extends BaseModel
     public function isAdmin(): bool
     {
         return $this->role === self::ROLE_ADMIN;
+    }
+
+    /**
+     * Promote this staff member to the admin role.
+     *
+     * This is the sole sanctioned path for setting role = admin. Callers must
+     * authorize the actor via PartnaStaffPolicy::update before invoking, and
+     * must record the transition in core.staff_audit_log.
+     */
+    public function promoteToAdmin(): void
+    {
+        $this->role = self::ROLE_ADMIN;
+        $this->save();
+    }
+
+    /**
+     * Demote this staff member to the support role.
+     *
+     * Same gating discipline as promoteToAdmin: caller authorizes + audits.
+     */
+    public function demoteToSupport(): void
+    {
+        $this->role = self::ROLE_SUPPORT;
+        $this->save();
     }
 }
