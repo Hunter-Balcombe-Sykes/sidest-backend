@@ -29,6 +29,15 @@ return [
         'key' => env('RESEND_API_KEY'),
     ],
 
+    // Supabase Send Email Hook — secret used to verify the HMAC signature
+    // on incoming Standard-Webhooks-format requests to
+    // POST /internal/email-hooks/supabase. Set this from the Supabase
+    // Dashboard → Authentication → Hooks → Send Email Hook page. Without it
+    // the hook endpoint returns 503 (fail-closed).
+    'supabase' => [
+        'email_hook_secret' => env('SUPABASE_EMAIL_HOOK_SECRET'),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
