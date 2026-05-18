@@ -6,7 +6,6 @@ use App\Http\Controllers\Api\Internal\EmbeddedOrderAnalyticsController;
 use App\Http\Controllers\Api\Internal\EmbeddedProductAnalyticsController;
 use App\Http\Controllers\Api\Internal\EmbeddedProductSettingsController;
 use App\Http\Controllers\Api\Internal\EmbeddedSetupController;
-use App\Http\Controllers\Api\Internal\EnvCheckController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateController;
 use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
@@ -242,11 +241,6 @@ Route::middleware(['shopify.session', 'throttle:embedded-by-shop'])->prefix('int
     Route::get('/product-settings', [EmbeddedProductSettingsController::class, 'show']);
     Route::patch('/product-settings', [EmbeddedProductSettingsController::class, 'update']);
 });
-
-// Self-diagnostic env-var check. Independent of every other auth subsystem on
-// purpose — this is the endpoint you hit when something else is misconfigured.
-// Auth is a single shared-secret header inside the controller.
-Route::get('/internal/env-check', EnvCheckController::class);
 
 // Internal Hydrogen endpoints (server-to-server, API key auth)
 Route::middleware(['hydrogen.key', 'throttle:hydrogen-internal'])->prefix('internal/hydrogen')->group(function () {
