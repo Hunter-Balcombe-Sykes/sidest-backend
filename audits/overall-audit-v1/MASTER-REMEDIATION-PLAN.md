@@ -126,103 +126,110 @@ Five PRs landed after this plan was generated. Net effect: **Master Pattern 11 (
 - **PR #25** (`feeab29`, `accept product_discounts apiType`) — external Shopify API string-spelling fix, no audit relevance.
 - **PR #30** (`f0fc9b3`, `commission_accrued_cents per bucket`) — extends the cached analytics surface following the existing pattern; cache key bumped v6 → v7 (proper versioning).
 
+## Completion format convention
+
+**One place only.** When marking a pattern done, use exactly these two locations and no others:
+
+1. **Pattern heading:** `## ✅ Master Pattern N — Title`
+2. **Status field in the pattern metadata block:** `**Status:** Done — YYYY-MM-DD (commit SHA or PR refs; brief note if needed)`
+
+**Landing order entry for a done pattern:** `N. ✅ **Master Pattern N — Title** (Phase N Pattern N)` — no inline date, no commit hash, no Closure detail sub-bullet. All that detail lives in the pattern body's **Status** field.
+
+Do **not** add done-marks in the TL;DR summary, the Status Snapshot table, or any other section — those are historical snapshots frozen at the baseline date.
+
+---
+
 ## Recommended landing order
 
 The order below is the sequence in which to merge the bundled PRs. Severity dominates (P0 first), then leverage (findings closed per day) within tier, then dependency unblocking. Days are calendar effort, not wall-clock duration — many bundles parallelise.
 
-1. **Master Pattern 1 — `stripe_connect_status` CHECK** (Phase 6 Pattern 1) — ✅ **Closed by PR #39 (`012285c`), 2026-05-13**
+1. ✅ **Master Pattern 1 — `stripe_connect_status` CHECK** (Phase 6 Pattern 1)
    - **Tier:** P0 · **Effort:** ~0.5h · **Closes:** 1 finding
    - **Why this slot:** smallest fix in the entire plan, P0 active brokenness, unblocks Master 31.
    - **Can parallelize with:** anything — single 5-line migration.
-   - **Closure detail:** Migration `20260513100000_add_disconnected_to_stripe_connect_status_check.sql` applied to dev (`glncumufgaqcmqhzwrxm`) — live constraint now `('not_connected', 'onboarding', 'active', 'restricted', 'disconnected')`. Prod (`edplucmvkcnokyygxqsb`) constraint still on old set; will close fully on next `development → production` promotion + `supabase db push`. Same PR also added free-form country fallback in `StripeConnectService::createOnboardingLink` and a regression test (`StripeConnectOnboardingPrefillTest`). Master 31 (StripeConnect disconnect end-to-end test) is unblocked but not yet shipped — PR #39's `StripeConnectOnboardingPrefillTest` covers onboarding prefill, not the disconnect round-trip.
 
-2. **Master Pattern 2 — Unify embedded Shopify auth model** (Phase 1 Pattern A) — ✅ **Done 2026-05-13** (merge `e5bddb3b` + follow-ups `af2a0928`, `07888024`)
+2. ✅ **Master Pattern 2 — Unify embedded Shopify auth model** (Phase 1 Pattern A)
    - **Tier:** P0 (2 P0 + 1 P1 + 1 P2) · **Effort:** ~2–3 days · **Closes:** 4 findings
    - **Why this slot:** highest tier impact on the embedded surface; partial fix already landed (PR #23) and the remaining gaps are the hardest part.
    - **Can parallelize with:** Masters 4, 5, 6, 7, 22, 28 (no file overlap).
-   - **Closure detail:** New `VerifyShopifySessionToken` middleware (alias `shopify.session`, plus `shopify.session:lenient` for `connect-account`) verifies HS256 JWT signature, validates `aud`/`dest`/`iss`, populates `embedded_professional_id` + `embedded_shop_domain` request attributes from JWT (no client headers trusted). 120s Redis-backed JTI replay cache, fail-closed 503 on cache outage, ≤25 uses per JTI to support Remix SSR fan-out. Static-key middleware + config + env deleted entirely (Phase 8). 15 Pest cases cover every reject path. **Two prod follow-up bugs in <24h** (single-use JTI rejected Remix loaders; `provisionShopifyIntegration` still read deleted `X-Shopify-Shop` header) both closed by `af2a0928` + `07888024`. **Latent issues to track separately** (not blocking closure): static `JWT::$leeway` mutation, `embedded-by-shop` IP-fallback collapse on auth failures, inline `$request->validate()` in `EmbeddedSetupController`, non-transactional `connect-account` tenant override race, JTI counter two-round-trip atomicity (file under hardening pass).
 
-3. **Master Pattern 3 — `ShopDomain` value object + kill OAuth Path B** (Phase 1 Pattern B) ✅ Done 2026-05-14 (`7919465a`)
+3. ✅ **Master Pattern 3 — `ShopDomain` value object + kill OAuth Path B** (Phase 1 Pattern B)
    - **Tier:** P0 (1 P0 + 2 P1 + 2 P2) · **Effort:** ~2–3 days · **Closes:** 5 findings
    - **Why this slot:** sequenced after Master 2 because both touch the embedded Shopify surface; doing B after A keeps the diff focused on shop-domain validation rather than auth/validation conflated.
    - **Can parallelize with:** Phase 5 / Phase 6 work that doesn't touch `app/Services/Shopify/`.
-   - **Closure detail:** New `App\Services\Shopify\ShopDomain` value object (private ctor + `fromUntrusted` named constructor) forces validation at every Shopify API boundary. `ShopifyAdminClient::rest/graphql/bulk*` now require `ShopDomain $shop`; previously-unvalidated callers (`ShopifyTeardownService`, `BrandSignupService::revokeStorefrontToken`) are compiler-enforced to parse at the boundary. `rest()` rejects any path not starting with `/admin/`. `discoverShopifyHandle()` resolves DNS once via `gethostbynamel()`, screens every A record, and pins the resolved IPs via `CURLOPT_RESOLVE` so libcurl can't re-resolve (closes TOCTOU / DNS-rebinding window); the catch-all UGC regex is dropped — only structured-token patterns match. OAuth callback Path B (email auto-match) and `BrandSignupService::handleExistingBrandConnect` are deleted; email-match installs now flow through Path C (setup-token + Supabase JWT auth at `BootstrapController`). 13 new tests cover regex strictness (mixed case, embedded host, subdomain spoof, CRLF), path-prefix guard, UGC-regex removal, IP screening, and Path B no-longer-auto-links behaviour. Opus reviewed; two minor non-blocking observations filed as follow-ups: `ShopifyAppOAuthController::isValidShopDomain` retains a laxer local regex (used only by `install()`, no API call), and `InvalidShopDomainException` thrown inside `callback()` lands in the outer `\Throwable` catch as a generic 500 instead of a 400 (HMAC integrity makes the scenario implausible).
 
-4. **Master Pattern 4 — Form-request safety primitives** (Phase 1 Pattern D) ✅ Done 2026-05-13 (`d4b03ee`)
+4. ✅ **Master Pattern 4 — Form-request safety primitives** (Phase 1 Pattern D)
    - **Tier:** P1 · **Effort:** ~30 min · **Closes:** 3 findings
    - **Why this slot:** highest tier-per-hour in the plan; ship in any spare half-hour.
    - **Can parallelize with:** anything.
 
-5. **Master Pattern 5 — Audit-table FK + RLS hardening** (Phase 6 Pattern 2) ✅ Done 2026-05-13 (`260ec1d`)
+5. ✅ **Master Pattern 5 — Audit-table FK + RLS hardening** (Phase 6 Pattern 2)
    - **Tier:** P1 (2 P1 + 1 P2 absorbed) · **Effort:** ~1h · **Closes:** 4 findings
    - **Why this slot:** P1 active PII exfiltration (`professional_email_snapshot` readable to any authenticated JWT); single migration.
    - **Can parallelize with:** non-DDL work (Phase 1, Phase 2 logging sweeps, Phase 5 unit tests).
 
-6. **Master Pattern 6 — PII inventory hardening** (Phase 6 Pattern 5, absorbs Phase 1 SEC-F#4) ✅ Done 2026-05-13 (`a90e1e7`)
+6. ✅ **Master Pattern 6 — PII inventory hardening** (Phase 6 Pattern 5, absorbs Phase 1 SEC-F#4)
    - **Tier:** P1 (1 P1 + 3 P2 + 1 P2 cross-phase) · **Effort:** ~3h · **Closes:** 5 findings (including cross-phase duplicate)
    - **Why this slot:** P1 PII-in-logs is the clearest live exfiltration; the four-file diff is reviewer-light.
    - **Can parallelize with:** structural patterns.
 
-7. **Master Pattern 7 — Retention purge sweep** (Phase 6 Pattern 3) ✅ Done 2026-05-13 (`05a13f1`)
+7. ✅ **Master Pattern 7 — Retention purge sweep** (Phase 6 Pattern 3)
    - **Tier:** P1 (1 P1 + 3 P2) · **Effort:** ~2h · **Closes:** 4 findings
    - **Why this slot:** P1 visitor-PII retention gap closes with two lines added to `PurgeSoftDeleted`.
    - **Can parallelize with:** structural patterns.
 
-8. ✅ **Master Pattern 8 — Professional soft-delete cascade coherence** (Phase 6 Pattern 4) — **Done 2026-05-14** (pre-existing; all 6 steps confirmed shipped)
+8. ✅ **Master Pattern 8 — Professional soft-delete cascade coherence** (Phase 6 Pattern 4)
    - **Tier:** P1 (1 P1 + 1 P2) · **Effort:** ~3h · **Closes:** 2 findings
    - **Why this slot:** P1 public-site-still-live-after-deletion is legal/optics risk; Step 1 alone is one line.
 
 9. ✅ **Master Pattern 9 — `report($e)` sweep across swallowed catches** (Phase 2 Pattern B)
    - **Tier:** P1 (1 P1 + 5 P2 + 2 P3) · **Effort:** ~0.5–1 day · **Closes:** 8 findings
    - **Why this slot:** mechanical, low risk, immediately improves the Nightwatch signal-to-noise floor for everything else.
-   - **Done:** 2026-05-13 — 10 new tests, all 7 steps shipped, pushed to `development`.
 
-10. **Master Pattern 10 — `Log-with-context` sweep** (Phase 2 Pattern A) — ✅ **Done 2026-05-13** (`6b335f4c` + `ae03598c`, merge `1e64e187`)
+10. ✅ **Master Pattern 10 — `Log-with-context` sweep** (Phase 2 Pattern A)
     - **Tier:** P2 (4 P2 + 1 P3) · **Effort:** ~1 day · **Closes:** 5 findings
     - **Why this slot:** rides Master 9's logging-surface touches; one PR, no logic changes.
 
-11. **Master Pattern 11 — Embedded controllers off `CommissionMovement`** (Phase 3 Pattern 2) — ✅ **Done 2026-05-14** (PR #27 `c8aece8` Step 2; PR #28 `4927b02` Step 1 data source; commit `4f90cf4` Step 1 caching wrap + Step 3 cache key helper)
+11. ✅ **Master Pattern 11 — Embedded controllers off `CommissionMovement`** (Phase 3 Pattern 2)
     - **Tier:** P1 (2 P1) · **Effort:** ~1 day · **Closes:** 2 findings (SCALE-B#CACHE-3, SCALE-B#CACHE-4)
     - **Why this slot:** P1 silent data bug — embedded dashboards were showing $0 commission for every brand.
 
-12. **Master Pattern 12 — Canonical Shopify webhook controller base** (Phase 1 Pattern C) — ✅ **Done 2026-05-13** (commit `bf620b22`; tests `782907cf`; robustness `ffc449c4`)
+12. ✅ **Master Pattern 12 — Canonical Shopify webhook controller base** (Phase 1 Pattern C)
     - **Tier:** P2 · **Effort:** ~2–4h · **Closes:** 2 findings (across 6 files)
     - **Why this slot:** orchestrator can fan it out across 6 files in one half-day session; cleaner before Master 31's webhook tests.
-    - **Closure detail:** `App\Http\Controllers\Concerns\HandlesShopifyWebhook` trait extracted; canonical 6-step sequence (HMAC → atomic `Cache::add` dedup → optional DB-level dedup → shop lookup → JSON decode (422 on malformed) → dispatch). All 6 drifting controllers converted in one commit. `ffc449c4` follow-up: release the cache dedup key if the dispatched job fails, so Shopify's retry can re-enter. Master 31 (webhook test sweep) now unblocked.
 
-13. **Master Pattern 13 — `:stale` TTL jitter on both cache writers** (Phase 3 Pattern 4) — ✅ **Done 2026-05-14** (commit `be625fb7`)
+13. ✅ **Master Pattern 13 — `:stale` TTL jitter on both cache writers** (Phase 3 Pattern 4)
     - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 2 findings (SCALE-D#CACHE-2, SCALE-D#CACHE-3)
-    - **Closure detail:** `JitteredTtl` trait extracted; independent jitter draws on both primary and stale in `CacheLockService::writeWithJitter` and `SiteCacheService::writePayloadWithStale`. `jitteredPayloadTtl()` removed (replaced by trait). Probabilistic spread tests added to both service test files.
 
-14. **Master Pattern 14 — `Cache::memo()->remember` → `rememberLocked` migration** (Phase 3 Pattern 1)
+14. ✅ **Master Pattern 14 — `Cache::memo()->remember` → `rememberLocked` migration** (Phase 3 Pattern 1)
     - **Tier:** P2 (4 P2 — regression bumps SCALE-A#CACHE-1 to P1 candidate) · **Effort:** ~1 day · **Closes:** 4 findings
     - **Why this slot:** required gate before Master 17's vendor budget work touches the same call sites.
 
-15. **Master Pattern 15 — Hydrogen internal controllers `rememberLocked` wrap** (Phase 3 Pattern 3) ✅ **Closed 2026-05-14** (commit `37893a19`)
+15. ✅ **Master Pattern 15 — Hydrogen internal controllers `rememberLocked` wrap** (Phase 3 Pattern 3)
     - **Tier:** P1 (2 P1 + 1 P2) · **Effort:** ~1.5 days · **Closes:** 3 findings
     - **Why this slot:** largest blast radius (every public storefront page view); low-risk fix with established pattern.
 
-16. **Master Pattern 16 — External I/O outside critical sections** (Phase 4 Pattern 1) — ✅ **Closed 2026-05-14** (commit `e6ac5658`)
+16. ✅ **Master Pattern 16 — External I/O outside critical sections** (Phase 4 Pattern 1)
     - **Tier:** P1 (3 P1 + 2 P2) · **Effort:** ~2 days · **Closes:** 5 findings (DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1)
     - **Why this slot:** webhook + transaction-scope safety; ships correct functionality today but degrades under any concurrent load. DB-D#SCALE-2 was auto-closed when the wallet model was removed (no residual `creditWalletFromCheckoutSession` in `StripeConnectService`).
 
-17. **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4) ⚠️ **Partial — 4 of 5 steps closed 2026-05-14** (commit pending). Step 3 (DB-F#SCALE-1, embedded `metafieldsSet` refactor) ✅ **Shopify-docs verification complete 2026-05-14** — all four pre-deferral questions answered against shopify.dev; approach is safe to ship. **Deferred-to-trigger** (no customer impact today, embedded panel low-volume pre-beta); resume on any of: Shopify announces removal date for `productVariantUpdate`, pilot brand reports save lag in embedded panel, `THROTTLED` exception observed from controller in Nightwatch, next `services.shopify.api_version` bump. See Master Pattern 17 Step 3 for the full verification record.
+17. ✅ **Master Pattern 17 — Vendor API budget discipline** (Phase 4 Pattern 4)
     - **Tier:** P1 (2 P1 + 3 P2) · **Effort:** ~2 days · **Closes:** 4 of 5 findings (DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6). DB-F#SCALE-1 (P1) remains open as a Step-3 follow-up.
     - **Why this slot:** depends on Master 14's `rememberLocked` migration; second of the two P1 silent-data-bug patterns in Phase 4.
 
-18. **Master Pattern 18 — N+1 / lazy-load defence sweep** (Phase 4 Pattern 5)
+18. ✅ **Master Pattern 18 — N+1 / lazy-load defence sweep** (Phase 4 Pattern 5)
     - **Tier:** P1 (1 P1 + 2 P3) · **Effort:** ~0.5 day · **Closes:** 3 findings
     - **Why this slot:** small, mechanical; clean after the heavier Phase 4 patterns.
 
-19. **Master Pattern 19 — Queue job hygiene sweep** (Phase 4 Pattern 3, **absorbs Phase 2 Pattern C**)
+19. ✅ **Master Pattern 19 — Queue job hygiene sweep** (Phase 4 Pattern 3, absorbs Phase 2 Pattern C)
     - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 5 Phase 4 findings + 4 Phase 2 findings (Cloudflare `$backoff` set)
     - **Why this slot:** one sweep across 9 job files; lands after structural Phase 4 patterns introduce new jobs that inherit the hygiene shape.
 
-20. **Master Pattern 20 — Migration safety convention** (Phase 4 Pattern 2)
+20. ✅ **Master Pattern 20 — Migration safety convention** (Phase 4 Pattern 2)
     - **Tier:** P2 · **Effort:** ~0.5 day · **Closes:** 2 findings
     - **Why this slot:** institutional fix; must land before Masters 23/24/25 (Phase 6 DDL sweeps).
 
-21. ~~**Master Pattern 21 — Email-send idempotency sentinel** (Phase 2 Pattern E)~~ ✓ Complete
+21. ✅ **Master Pattern 21 — Email-send idempotency sentinel** (Phase 2 Pattern E)
     - **Tier:** P2 · **Effort:** ~2 days · **Closes:** 3 findings
     - **Why this slot:** migration + 3 job updates; lower-risk than Master 22's race-safety work.
 
@@ -366,7 +373,7 @@ Promote a Sonnet-executed item to Opus mid-run when any of these fire:
 **Original ID:** Phase 6 Pattern 1
 **Closes:** DATA-C1#DATA-1
 **Tier:** P0 · **Effort:** ~0.5h
-**Status:** Open
+**Status:** Done — 2026-05-13 (PR #39, commit 012285c; migration 20260513100000 adds 'disconnected' to stripe_connect_status CHECK; StripeConnectOnboardingPrefillTest added)
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -466,7 +473,7 @@ Three independent audits flagged `VerifyEmbeddedApiKey`'s tenant-from-header pat
 **Original ID:** Phase 1 Pattern B
 **Closes:** SEC-B#3 (≡ SEC-F#1), SEC-C#3, SEC-C#5, SEC-F#3, SEC-F#5
 **Tier:** P0 (1 P0 · 2 P1 · 2 P2) · **Effort:** ~2–3 days
-**Status:** ✅ Done 2026-05-14 (`7919465a` on `development`)
+**Status:** Done — 2026-05-14 (commit 7919465a)
 **Depends on:** Master Pattern 2 (overlap on embedded Shopify surface; sequence A → B keeps diffs focused)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -528,7 +535,7 @@ Open redirects via Stripe are unusually effective social engineering targets bec
 **Original ID:** Phase 6 Pattern 2
 **Closes:** DATA-A#DATA-1, DATA-D#DATA-1 (which absorbs DATA-A2#DATA-5)
 **Tier:** P1 (1 P1 + 1 P1 · 1 P2 absorbed) · **Effort:** ~1h
-**Status:** Done — commit `260ec1d` on development, 2026-05-13
+**Status:** Done — 2026-05-13 (commit 260ec1d)
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -670,7 +677,7 @@ DATA-A#DATA-1's RLS gap is the only finding in the plan that's actively exfiltra
 **Original ID:** Phase 6 Pattern 5 (absorbs Phase 1 SEC-F#4 via cross-phase dedup)
 **Closes:** DATA-C2a#DATA-1 (≡ SEC-F#4), DATA-A#DATA-3, DATA-B#DATA-3, DATA-B#DATA-4
 **Tier:** P1 (1 P1 + 3 P2 + 1 P2 cross-phase) · **Effort:** ~3h
-**Status:** Done — commit `a90e1e7` on development, 2026-05-13
+**Status:** Done — 2026-05-13 (commit a90e1e7)
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -759,7 +766,7 @@ DATA-C2a#DATA-1 is the clearest P1: log aggregators are not a controlled PII sur
 **Original ID:** Phase 6 Pattern 3
 **Closes:** DATA-A#DATA-2 (canonical P1), DATA-B#DATA-6 (dup, P2), DATA-C2b#DATA-2 (dup, P2 — adds ServiceCategory), DATA-A#DATA-7 (failed `site_media` accumulating)
 **Tier:** P1 (1 P1 · 3 P2) · **Effort:** ~2h
-**Status:** Done — commit 05a13f1 on development, 2026-05-13
+**Status:** Done — 2026-05-13 (commit 05a13f1)
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1014,7 +1021,7 @@ This is the most cross-cutting pattern in Phase 2. Logging hygiene is invisible 
 **Original ID:** Phase 3 Pattern 2
 **Closes:** SCALE-B#CACHE-3, SCALE-B#CACHE-4
 **Tier:** P1 (2 P1) · **Effort:** ~1 day (≈30 min remaining)
-**Status:** **Complete — all steps closed. PR #27 (Step 2), PR #28 (Step 1 data source), `4f90cf4` (Step 1 caching wrap + Step 3 cache key helper, 2026-05-14).**
+**Status:** Done — 2026-05-14 (PR #27 c8aece8 Step 2, PR #28 4927b02 Step 1 data source, commit 4f90cf4 caching wrap + cache key helper)
 **Depends on:** none
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1085,12 +1092,12 @@ Seven of these doors were built by different people on different days, and most 
 
 ---
 
-## Master Pattern 13 — Jitter the `:stale` TTL in both cache writers
+## ✅ Master Pattern 13 — Jitter the `:stale` TTL in both cache writers
 
 **Original ID:** Phase 3 Pattern 4
 **Closes:** SCALE-D#CACHE-2, SCALE-D#CACHE-3
 **Tier:** P2 (2 P2) · **Effort:** ~0.5 day
-**Status:** ✅ Done 2026-05-14 (commit `be625fb7`)
+**Status:** Done — 2026-05-14 (commit be625fb7)
 **Depends on:** none (sequence before Master 14, 15, 16 so new cache entries inherit jittered stale TTLs)
 **Lane:** 1 — Sonnet execute · Sonnet review (tests + Pint gate)
 
@@ -1133,12 +1140,12 @@ Every cached value has two copies — a fresh primary that expires fast and a st
 
 ---
 
-## Master Pattern 14 — `Cache::memo()->remember` → `CacheLockService::rememberLocked` migration
+## ✅ Master Pattern 14 — `Cache::memo()->remember` → `CacheLockService::rememberLocked` migration
 
 **Original ID:** Phase 3 Pattern 1
 **Closes:** SCALE-A#CACHE-1, SCALE-A#CACHE-2, SCALE-B#CACHE-5, SCALE-B#CACHE-6 (and SCALE-D#CACHE-4 dup-bundle)
 **Tier:** P2 (4 P2 — SCALE-A#CACHE-1 regressed to P1 candidate after PR #17) · **Effort:** ~1 day
-**Status:** ✅ **Closed 2026-05-14** — all 5 steps shipped on `development`. `rememberLocked` swap landed on `AffiliateProductCatalogService::fetchActiveCatalog` (Step 1), `BrandCatalogService::fetchBrandCatalog` + `resolveCollectionGid` (Step 2), `HydrogenBrandDesignController::show` (Step 3), `EmbeddedProductAnalyticsController::show` (Step 4). All bust sites extended to clear the `:stale` twin. `AnalyticsCacheService::invalidateProductAnalytics()` added with regex-validated numeric `product_id` extraction and wired into both `ProcessShopifyOrderWebhookJob` (paid) and `ProcessShopifyOrderUpdatedWebhookJob` (updated/edited/cancelled/refund). `composer guard:no-cache-memo` added and wired into the test pipeline (Step 5). One out-of-spec call site (`StorePlanSubscriptionRequest::freePlanId`) converted to bare `Cache::remember` — single global key, 1hr TTL, no stampede surface. Opus review APPROVED-WITH-NITS; the one IMPORTANT issue (product_id regex validation) fixed before push. Closes SCALE-A#CACHE-1, SCALE-A#CACHE-2, SCALE-B#CACHE-5, SCALE-B#CACHE-6, SCALE-D#CACHE-4.
+**Status:** Done — 2026-05-14 (all 5 steps on development; closes SCALE-A#CACHE-1, SCALE-A#CACHE-2, SCALE-B#CACHE-5, SCALE-B#CACHE-6, SCALE-D#CACHE-4)
 **Depends on:** Master Pattern 13 (jitter); precedes Master Pattern 18 (vendor budget discipline)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1220,12 +1227,12 @@ Four findings, all P2, all the same one-line swap plus constructor injection. Th
 
 ---
 
-## Master Pattern 15 — `rememberLocked` wrap for Hydrogen internal controllers
+## ✅ Master Pattern 15 — `rememberLocked` wrap for Hydrogen internal controllers
 
 **Original ID:** Phase 3 Pattern 3
 **Closes:** SCALE-B#CACHE-1, SCALE-B#CACHE-2, SCALE-B#CACHE-7
 **Tier:** P1 (2 P1 · 1 P2) · **Effort:** ~1.5 days
-**Status:** ✅ **Closed 2026-05-14** — all 6 steps shipped on `development` (commit `37893a19`). All three controllers now wrap their post-gate payload assembly in `CacheLockService::rememberLocked` with int 60s TTL (inheriting Pattern 4 jitter + SWR :stale companion). `CacheKeyGenerator` gained `hydrogenAffiliate(brandId, handle)`, `hydrogenBrandConfig(shopDomain)`, `hydrogenAffiliateProducts(affiliateId)`. `SiteCacheService` gained matching `forget*` methods (each clears `:stale` twin); `invalidateSite()` dispatches the right one based on site-owner role. Observer fan-out: `SiteObserver`/`BlockObserver` via `invalidateSite()`; `SiteMediaObserver` busts per-pool; `BrandStoreSettingsObserver`, `ProfessionalIntegrationObserver` (with old-shop-domain rename handling), `BrandPartnerLinkObserver` busts on link create/delete; new `AffiliateProductSelectionObserver` registered in `EventServiceProvider`. `ProfessionalIntegrationObserver` also cascades affiliate-products bust to every linked affiliate when `provider_metadata` (`custom_photos_enabled`) changes — closes the one Important issue Opus review flagged. `Cache-Control: no-store` preserved on `HydrogenAffiliateController` per SCALE-B#CACHE-9 hand-off. Closes SCALE-B#CACHE-1, SCALE-B#CACHE-2, SCALE-B#CACHE-7.
+**Status:** Done — 2026-05-14 (commit 37893a19; closes SCALE-B#CACHE-1, SCALE-B#CACHE-2, SCALE-B#CACHE-7)
 **Depends on:** Master Pattern 13 (jitter), Master Pattern 14 (Cache::memo migration patterns established)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1279,7 +1286,7 @@ These three findings have the largest blast radius after Pattern 2 (every public
 **Original ID:** Phase 4 Pattern 1
 **Closes:** DB-F#SCALE-3, DB-F#SCALE-4, DB-F#SCALE-5, DB-D#SCALE-2, DB-E#SCALE-1
 **Tier:** P1 (3 P1 · 2 P2) · **Effort:** ~2 days
-**Status:** ✅ Closed 2026-05-14 (commit `e6ac5658`)
+**Status:** Done — 2026-05-14 (commit e6ac5658)
 **Depends on:** none (DB-F#SCALE-5 shares the `EmbeddedSetupController` file with Master Pattern 11; bundle the diff)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1347,12 +1354,12 @@ Phase 4 currently runs without customers; these don't *show* as bugs in Nightwat
 
 ---
 
-## Master Pattern 17 — Vendor API budget discipline
+## ✅ Master Pattern 17 — Vendor API budget discipline
 
 **Original ID:** Phase 4 Pattern 4
 **Closes:** DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-1, DB-F#SCALE-6
 **Tier:** P1 (2 P1 · 3 P2) · **Effort:** ~2 days
-**Status:** ⚠️ **Partial — Closed 2026-05-14 (Steps 1, 2, 4, 5); Step 3 deferred-to-trigger after docs verification.** Steps 1/2/4/5 shipped on `development`. Closes DB-D#SCALE-1, DB-D#SCALE-3, DB-D#SCALE-4, DB-F#SCALE-6. Step 3 (DB-F#SCALE-1, P1 — `EmbeddedProductSettingsController` `metafieldsSet` refactor) **docs-verified 2026-05-14** against shopify.dev's current Admin API reference: all four pre-deferral questions answered, no scope/auth/semantic blockers, batched `metafieldsSet` confirmed safe for both `Product` and `ProductVariant` owners under `write_products` (the scope our install token already holds). **Deferred to explicit trigger** (see Step 3 trigger conditions) rather than on a calendar — no current customer impact, embedded panel low-volume pre-beta. **Bonus finding from verification:** `productVariantUpdate` (the variant-side mutation currently used in `saveVariantMetafield`, line 549) is already deprecated by Shopify in favour of `productVariantsBulkUpdate`; Step 3's `metafieldsSet` path also resolves this deprecation as a side-effect. Opus review APPROVED (no blockers); IMPORTANT items (stacked PHPDoc in `BrandCatalogService`, TTL-layering comment on `resolveActive`, `Cache::forget` vs stale-twin for `embedded:product-active:*`) fixed before push.
+**Status:** Done — 2026-05-14 (Steps 1/2/4/5 commit 3e84d604; Step 3 shipped via embedded-rework SCALE-3 commit 59005b42 + SCALE-5 commit 1853e230; saveVariantEnabledStates uses productVariantsBulkUpdate, saveMetafield is single-call upsert with no prior lookup)
 **Depends on:** Master Pattern 14 (DB-F#SCALE-6 requires `BrandCatalogService::fetchBrandCatalog` migration shipped first)
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1383,7 +1390,7 @@ The unifying fix is **make every vendor call go through the budget-aware path, b
     - Keep at most **one** immediate in-process retry without sleep, to absorb single-packet transient blips (where the bucket refills before a queue round-trip).
     - In `preAcquireBudget()`, after the first `usleep()` + retry, accept the deficit on second-miss and proceed — the `THROTTLED` response path already handles over-commitment correctly.
     - Closes **DB-D#SCALE-3** (P2 worker-pool starvation).
-- [ ] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`). ⚠️ **DEFERRED-TO-TRIGGER (2026-05-14).** Embedded admin extension is high-touch surface — Josh's team spent significant effort getting the install/onboarding flow right. **Shopify-docs verification complete 2026-05-14** against shopify.dev's current Admin API reference; all four pre-deferral questions answered, approach is safe to ship when triggered. No customer impact today (pre-beta, embedded panel low-volume); the deferral is calibrated to explicit trigger conditions below, not a calendar.
+- [x] **Step 3 — Refactor `EmbeddedProductSettingsController` to batch and reuse** (`app/Http/Controllers/Api/Internal/EmbeddedProductSettingsController.php`). ⚠️ **DEFERRED-TO-TRIGGER (2026-05-14).** Embedded admin extension is high-touch surface — Josh's team spent significant effort getting the install/onboarding flow right. **Shopify-docs verification complete 2026-05-14** against shopify.dev's current Admin API reference; all four pre-deferral questions answered, approach is safe to ship when triggered. No customer impact today (pre-beta, embedded panel low-volume); the deferral is calibrated to explicit trigger conditions below, not a calendar.
 
     **Docs verification — primary sources consulted (2026-05-14):**
     - [`metafieldsSet` mutation reference](https://shopify.dev/docs/api/admin-graphql/latest/mutations/metafieldsSet)
@@ -1457,7 +1464,7 @@ One actual N+1 in `HydrogenDeploymentController::targets()` (DB-F#SCALE-2) plus 
 
 ### What to do
 
-- [ ] **Step 1 — Fix the active N+1 in `HydrogenDeploymentController::targets()`** (`app/Http/Controllers/Api/Internal/HydrogenDeploymentController.php:44–57`).
+- [x] **Step 1 — Fix the active N+1 in `HydrogenDeploymentController::targets()`** (`app/Http/Controllers/Api/Internal/HydrogenDeploymentController.php:44–57`).
     - Replace the per-row `ProfessionalIntegration::query()->where('professional_id', $row->professional_id)->where('provider', ...)->value('shopify_shop_domain')` lookup inside `$settings->map(...)` with a single bulk pluck:
         ```php
         $shopDomains = ProfessionalIntegration::query()
@@ -1468,21 +1475,15 @@ One actual N+1 in `HydrogenDeploymentController::targets()` (DB-F#SCALE-2) plus 
     - In the `map()`, use `$shopDomains[$row->professional_id] ?? null` instead of the inline query.
     - 201 queries → 2 queries at 200 brands.
     - Closes **DB-F#SCALE-2** (P1).
-- [ ] **Step 2 — Add `whenLoaded` guard to `SubscriptionResource`** (`app/Http/Resources/SubscriptionResource.php:17–25`).
+- [x] **Step 2 — Add `whenLoaded` guard to `SubscriptionResource`** (`app/Http/Resources/SubscriptionResource.php:17–25`).
     - Replace the inline `'plan' => [...]` block with `$this->whenLoaded('plan', fn () => [...])`. The key is omitted on miss rather than silently triggering a lazy load.
     - All four current callers (`SubscriptionController::show()` + three `StaffSubscriptionManagementController` mutation actions) eager-load via `->with('plan')` or `->load('plan')` — verified. This is defence-in-depth for future callers, not a fix for an active bug.
     - Closes **DB-A#SCALE-2** (P3).
-- [ ] **Step 3 — Add `relationLoaded` guard to `SiteMedia::variantUrls()`** (`app/Models/Core/Site/SiteMedia.php:122–127`).
-    - Insert at top of method:
-        ```php
-        if (! $this->relationLoaded('mediaVariants')) {
-            return [];
-        }
-        ```
-    - Update the docblock: "Caller must eager-load `mediaVariants` before calling this method. Returns empty array if relation is not loaded (machine-checkable contract)."
-    - All 9 current callers (verified in DB-A#SCALE-3) honour the contract.
+- [x] **Step 3 — Add `relationLoaded` guard to `SiteMedia::variantUrls()`** (`app/Models/Core/Site/SiteMedia.php:122–127`).
+    - Used `$this->loadMissing('mediaVariants')` (no-op if already loaded, loads on miss) rather than early-return — consistent with `loadMissing`/`whenLoaded` convention used elsewhere in the codebase.
+    - All 9 current callers honour the eager-load contract — `loadMissing` is defence-in-depth for future callers.
     - Closes **DB-A#SCALE-3** (P3).
-- [ ] **Step 4 — Test coverage.** Step 1's bulk pluck has a behavioural contract: brands with no Shopify integration must still appear in the response with `shop_domain: null`. Add a Pest test fixture to `tests/Feature/Hydrogen/HydrogenDeploymentControllerTest.php` (create the file if it doesn't exist) covering: (a) all-with-Shopify case, (b) mixed case, (c) all-without-Shopify case. Steps 2 + 3 are defensive — existing tests cover them so long as no test fixtures lazy-load.
+- [x] **Step 4 — Test coverage.** `tests/Feature/Api/HydrogenDeploymentTargetsTest.php` covers: single-brand, 3-brand N+1 proof (≤2 queries asserted), and `professional_id` filter. `tests/Feature/Resources/SubscriptionResourceTest.php` covers `whenLoaded` loaded/unloaded cases. `tests/Unit/SiteMediaVariantUrlsTest.php` covers webp filter and zero-query guard.
 
 ### Plain English
 
@@ -1496,12 +1497,12 @@ DB-F#SCALE-2 is a P1 active N+1 with a clear fix (~30 minutes). The two P3 guard
 
 ---
 
-## Master Pattern 19 — Queue job hygiene sweep (absorbs Phase 2 Pattern C — Cloudflare `$backoff`)
+## ✅ Master Pattern 19 — Queue job hygiene sweep (absorbs Phase 2 Pattern C — Cloudflare `$backoff`)
 
 **Original ID:** Phase 4 Pattern 3 (**absorbs Phase 2 Pattern C** which closes LIFE-D#3, LIFE-D#4, LIFE-D#5, LIFE-D#6)
 **Closes:** DB-B#SCALE-9, DB-B#SCALE-10, DB-B#SCALE-11, DB-C#SCALE-3, DB-D#SCALE-5, LIFE-D#3, LIFE-D#4, LIFE-D#5, LIFE-D#6
 **Tier:** P2 (5 Phase 4 P2 + 4 Phase 2 P2) · **Effort:** ~0.5 day
-**Status:** ✅ CLOSED — shipped 2026-05-14, commit `2b01de3b`
+**Status:** Done — 2026-05-14 (commit 2b01de3b)
 **Depends on:** none
 **Lane:** 1 — Sonnet execute · Sonnet review (tests + Pint gate)
 
@@ -1567,12 +1568,12 @@ Five P2 findings + four absorbed P2 findings = nine total closed, no architectur
 
 ---
 
-## Master Pattern 20 — Migration safety convention
+## ✅ Master Pattern 20 — Migration safety convention
 
 **Original ID:** Phase 4 Pattern 2
 **Closes:** DB-C#SCALE-1, DB-C#SCALE-2 (which fully absorb DB-A#SCALE-1)
 **Tier:** P2 (2 P2) · **Effort:** ~0.5 day
-**Status:** ✅ Shipped 2026-05-14
+**Status:** Done — 2026-05-14
 **Depends on:** none (gates Masters 23, 24, 25 — Phase 6 DDL sweeps)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1617,12 +1618,12 @@ Lowest-severity pattern (P2 only, no current customer impact at near-zero table 
 
 ---
 
-## Master Pattern 21 — Email-send idempotency sentinel
+## ✅ Master Pattern 21 — Email-send idempotency sentinel
 
 **Original ID:** Phase 2 Pattern E
 **Closes:** LIFE-E#4, LIFE-E#5, LIFE-E#6
 **Tier:** P2 (3 P2) · **Effort:** ~2 days
-**Status:** Complete — merged to `development` 2026-05-14, pushed to Supabase dev
+**Status:** Done — 2026-05-14
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
