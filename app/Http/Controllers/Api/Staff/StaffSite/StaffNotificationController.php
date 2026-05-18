@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api\Staff\StaffSite;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Jobs\Notifications\SendStaffBroadcastEmailsJob;
+use App\Jobs\Notifications\SendTransactionalNotificationEmailJob;
 use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\Professional;
 use App\Services\Notifications\NotificationListingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 // V2: Staff creates global or targeted notifications with optional email broadcast,
 // and acts on behalf of a professional to clear stuck banners (NOTIF-1).
@@ -33,34 +35,51 @@ class StaffNotificationController extends ApiController
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'send_email' => ['nullable', 'boolean'],
             'email_list_key' => ['nullable', 'string', 'max:50'],
+            // Whitelisted to the three staff-broadcast categories only. Categories
+            // like 'commissions' / 'payouts' have canonical event sources and must
+            // not be manually issuable via this endpoint.
+            'category' => ['nullable', 'string', Rule::in(['policy_update', 'incident', 'feature_announcement'])],
         ]);
 
         $data['type'] = Notification::normalizeFrontendType($data['type'] ?? null, $data['severity'] ?? null);
         $data['severity'] = Notification::severityForFrontendType($data['type']);
 
-        // Staff broadcasts have no semantic category to key retention against (the
-        // sidest.notification_retention_days map uses keys like 'invite' / 'brand_status',
-        // not frontend severity labels), so default to the map's 'default' lifetime when
-        // the caller hasn't explicitly set ends_at. A null default is intentional —
-        // it means "keep until manually ended/dismissed", so leave ends_at unset.
+        // Retention now follows the category (e.g. policy_update=365d, incident=14d)
+        // when one is set; otherwise we fall back to the map's 'default' lifetime.
+        // A null retention value is intentional — it means "keep until manually
+        // ended/dismissed", so leave ends_at unset in that case.
         if (empty($data['ends_at'])) {
-            $days = config('partna.notification_retention_days.default', 30);
+            $retentionKey = $data['category'] ?? 'default';
+            $days = config("partna.notification_retention_days.{$retentionKey}", config('partna.notification_retention_days.default', 30));
             if ($days !== null) {
                 $data['ends_at'] = now()->addDays((int) $days);
             }
         }
 
-        $notification = Notification::query()->create($data);
+        $notification = Notification::query()->create([
+            ...$data,
+            'category' => $data['category'] ?? null,
+        ]);
 
         $sendEmail = (bool) ($data['send_email'] ?? false);
         $emailListKey = $data['email_list_key'] ?? 'sidest_updates';
 
         if ($sendEmail) {
-            // Only broadcast emails for global notifications (professional_id null)
-            // If you want to allow targeted emails too, remove this guard.
-            if ($notification->professional_id === null) {
+            if ($notification->professional_id !== null && $notification->category !== null) {
+                // Targeted, categorised: unified pipeline — respects user notification_email_preferences.
+                SendTransactionalNotificationEmailJob::dispatch(
+                    $notification->id,
+                    $notification->category,
+                    $notification->professional_id,
+                );
+            } elseif ($notification->professional_id === null) {
+                // Global: newsletter-style mass email to email_list_key subscribers.
+                // Bypasses per-category prefs by design — globals are announcement-class
+                // (incidents, policy updates) that should reach the audience regardless.
                 SendStaffBroadcastEmailsJob::dispatch($notification->id, $emailListKey);
             }
+            // Targeted broadcast without category + send_email=true is a no-op today (no
+            // dispatch path). Could log a warning but it's a niche case — leave silent.
         }
 
         return $this->success(['notification' => $notification], 201);

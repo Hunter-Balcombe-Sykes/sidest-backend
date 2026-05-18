@@ -1001,6 +1001,9 @@ return [
             'subscriptions' => \App\Mail\Notifications\SubscriptionMail::class,
             'brand_links' => \App\Mail\Notifications\BrandLinkMail::class,
             'payout_warnings' => \App\Mail\Notifications\PayoutWarningMail::class,
+            'policy_update' => \App\Mail\Notifications\PolicyUpdateMail::class,
+            'incident' => \App\Mail\Notifications\IncidentMail::class,
+            'feature_announcement' => \App\Mail\Notifications\FeatureAnnouncementMail::class,
         ],
 
         /*

@@ -18,9 +18,14 @@ use Symfony\Component\Finder\Finder;
 */
 
 const MAILABLE_COVERAGE_EXEMPT = [
-    // No exemptions today. If a category is genuinely emit-only via a path
-    // other than publish() (e.g. a future direct-send mailable that's still
-    // categorised for preference toggling), add it here with the reason.
+    // Issued by StaffNotificationController via direct Notification::create() with
+    // category from a request variable, not via NotificationPublisher::publish() with
+    // a string literal. The grep-based sweep can't detect dynamic-category emits,
+    // and we don't want to force a publish() refactor for the staff-authored path
+    // (it has different semantics — no dedupe_key, supports global broadcasts).
+    'policy_update',
+    'incident',
+    'feature_announcement',
 ];
 
 it('every configured mailable category has at least one publish() call site', function () {
