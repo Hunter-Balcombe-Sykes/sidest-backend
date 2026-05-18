@@ -58,6 +58,13 @@ class ProcessImageVariantsJob implements ShouldQueue
         // redelivered job mid-process would re-enter variant generation in
         // parallel and race on Storage::put writes.
         // TTL is timeout + 60s buffer so the lock auto-expires after a crash.
+        //
+        // Trade-off (same as ProcessVideoVariantsJob): a worker death leaves the
+        // lock held until TTL expiry; retries during that window silently return
+        // and Laravel marks the job complete. A separate cleanup pass over rows
+        // stuck in PROCESSING past their expected duration is the right place to
+        // reconcile this — release-with-delay here would consume `tries` and
+        // surface as a spurious `failed()` if the lock holder is still alive.
         $lockKey = "image:processing-lock:{$this->imageId}";
         $acquired = Redis::set($lockKey, '1', 'EX', $this->timeout + 60, 'NX');
         if (! $acquired) {

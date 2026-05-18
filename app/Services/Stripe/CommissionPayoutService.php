@@ -203,10 +203,14 @@ class CommissionPayoutService
      * transaction so a concurrent sweep cannot double-claim the same orders.
      *
      * The forceCreate is additionally protected by the `commission_payouts_natural_key_uq`
-     * partial UNIQUE index (brand_professional_id, affiliate_professional_id, eligible_after)
-     * — if a concurrent path bypasses the row lock and inserts first, the second writer
-     * loses with a UniqueConstraintViolationException and we treat the conflict as
-     * "another worker created this batch" by returning null.
+     * partial UNIQUE index — keyed on
+     * (brand_professional_id, affiliate_professional_id, currency_code, eligible_after::date)
+     * for non-terminal statuses. If a concurrent path bypasses the row lock and inserts
+     * first, the second writer loses with a UniqueConstraintViolationException and we
+     * treat the conflict as "another worker created this batch" by returning null.
+     * The date-bucketed expression in the index is required because eligible_after is
+     * set from now()->utc()->subDays(...) at microsecond precision; without bucketing
+     * the index would never catch two same-day sweeps.
      */
     private function createPayoutBatch(
         string $brandId,

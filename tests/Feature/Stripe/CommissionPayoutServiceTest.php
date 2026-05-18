@@ -860,6 +860,55 @@ it('creates new payout batches for eligible approved orders', function () {
     expect($stats['batches_created'])->toBe(1);
 });
 
+it('treats UniqueConstraintViolationException on payout natural key as another worker won the race', function () {
+    // Master Pattern 22 Step 1 — the new partial UNIQUE index on
+    // (brand, affiliate, currency, date(eligible_after)) catches duplicate
+    // open payouts if a writer bypasses the application-level order lock.
+    // createPayoutBatch must catch the UCV, log a warning, return null, and
+    // let the outer sweep loop continue without crashing.
+    $brand = v2_createBrand();
+    $aff = v2_createAffiliate();
+
+    // Mirror the production partial UNIQUE index in this single test so the
+    // catch path is reachable. We drop it in afterEach below so neighbouring
+    // tests that happen to share natural keys are unaffected.
+    // SQLite scopes index names by attached-database name (`schema.indexname`)
+    // rather than by referenced-table schema, so the production
+    // `commerce.commission_payouts_natural_key_uq` becomes this in tests.
+    DB::connection('pgsql')->statement(
+        'CREATE UNIQUE INDEX IF NOT EXISTS commerce.commission_payouts_natural_key_uq
+         ON commission_payouts (
+             brand_professional_id,
+             affiliate_professional_id,
+             currency_code,
+             date(eligible_after)
+         )
+         WHERE status NOT IN (\'cancelled\', \'failed\')'
+    );
+
+    try {
+        // Pre-existing pending payout for the same brand/affiliate/currency/day —
+        // the sweep's forceCreate must hit the index and trigger the catch path.
+        v2_createPayout($brand, $aff, [
+            'status' => 'pending',
+            'eligible_after' => now()->utc()->subDays(7),
+        ]);
+
+        v2_createOrder($brand, $aff, ['commission_cents' => 1500]);
+
+        $svc = new CommissionPayoutService(v2_mockStripeClient());
+
+        // Must not throw — UCV is caught, null is returned, outer loop continues.
+        $stats = $svc->processEligiblePayouts();
+
+        // The pre-existing payout still gets requeued, but no NEW batch is created.
+        expect($stats['batches_created'])->toBe(0);
+        expect($stats['batches_requeued'])->toBe(1);
+    } finally {
+        DB::connection('pgsql')->statement('DROP INDEX IF EXISTS commerce.commission_payouts_natural_key_uq');
+    }
+});
+
 it('excludes brands with missing payment method from eligibility', function () {
     $brand = tap(new Professional([
         'id' => Str::uuid()->toString(),

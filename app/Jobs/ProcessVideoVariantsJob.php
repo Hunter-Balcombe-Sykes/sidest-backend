@@ -60,6 +60,15 @@ class ProcessVideoVariantsJob implements ShouldQueue
         // below covers READY/FAILED but not PROCESSING — without this lock, a
         // redelivered job mid-encode would re-enter FFmpeg work in parallel.
         // TTL is timeout + 60s buffer so the lock auto-expires after a crash.
+        //
+        // Trade-off: a SIGKILL/OOM of the lock holder leaves the lock held until
+        // TTL expiry. Retries that land inside the held window silently return
+        // and the queue marks the job complete, so the SiteMedia row can be left
+        // stuck in PROCESSING for up to (timeout + 60)s after a worker death.
+        // A separate cleanup story (cron over rows in PROCESSING past their
+        // expected duration) is the right place to reconcile this — adding
+        // release-with-delay here would consume `tries` and trigger a spurious
+        // `failed()` if the lock holder is still alive when retries exhaust.
         $lockKey = "video:processing-lock:{$this->mediaId}";
         $acquired = Redis::set($lockKey, '1', 'EX', $this->timeout + 60, 'NX');
         if (! $acquired) {
