@@ -18,8 +18,9 @@ it('rejects missing bootstrap fields', function () {
     expect($validator->fails())->toBeTrue();
     expect($validator->errors()->has('display_name'))->toBeTrue();
     expect($validator->errors()->has('primary_email'))->toBeTrue();
-    expect($validator->errors()->has('phone'))->toBeTrue();
-    expect($validator->errors()->has('first_name'))->toBeTrue();
+    // phone and first_name are nullable — OAuth sign-ups don't provide them
+    expect($validator->errors()->has('phone'))->toBeFalse();
+    expect($validator->errors()->has('first_name'))->toBeFalse();
     expect($validator->errors()->has('professional_type'))->toBeTrue();
 });
 
