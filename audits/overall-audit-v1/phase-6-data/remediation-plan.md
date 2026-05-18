@@ -714,7 +714,7 @@ For tables without the DB trigger, `updated_at` stays at its old value after any
 
 ### What to do
 
-- [ ] **Step 1 — Add triggers in a single migration.** Write `supabase/migrations/<timestamp>_add_updated_at_triggers.sql`:
+- [x] **Step 1 — Add triggers in a single migration.** Write `supabase/migrations/<timestamp>_add_updated_at_triggers.sql`:
     ```sql
     CREATE OR REPLACE TRIGGER set_timestamp_services
         BEFORE UPDATE ON site.services
@@ -768,8 +768,8 @@ For tables without the DB trigger, `updated_at` stays at its old value after any
         BEFORE UPDATE ON core.gdpr_requests
         FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
     ```
-- [ ] **Step 2 — Verify the trigger function exists.** `\df public.set_updated_at` in psql. If it doesn't (baseline drift), the migration is incomplete; locate or recreate.
-- [ ] **Step 3 — Add a CI sweep.** Write `tests/Feature/Database/UpdatedAtTriggerCoverageTest.php` that asserts every table with an `updated_at timestamptz` column has a `set_updated_at` trigger registered in `information_schema.triggers`. Catches the next omission.
+- [x] **Step 2 — Verify the trigger function exists.** `\df public.set_updated_at` in psql. If it doesn't (baseline drift), the migration is incomplete; locate or recreate.
+- [x] **Step 3 — Add a CI sweep.** Write `tests/Feature/Database/UpdatedAtTriggerCoverageTest.php` that asserts every table with an `updated_at timestamptz` column has a `set_updated_at` trigger registered in `information_schema.triggers`. Catches the next omission.
 
 ### Plain English
 

@@ -10,7 +10,7 @@
 - **167 unique findings** across 6 phases after cross-phase deduplication (168 within-phase unique − 1 cross-phase dup)
 - **Tier totals:** 4 P0 · 40 P1 · 97 P2 · 26 P3
 - **41 foundational patterns** close ~128 findings; **41 standalone fixes** cover the residual ~39 (a few standalone entries bundle 2-3 closely related findings)
-- **14 patterns shipped on origin/development as of 2026-05-18:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`), M20 (migration safety convention + CI guard), M23 (`7b86d8e6`; CHECK sweep), M24 (`c550dd1d`; FK index sweep). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
+- **15 patterns shipped on origin/development as of 2026-05-18:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`), M20 (migration safety convention + CI guard), M23 (`7b86d8e6`; CHECK sweep), M24 (`c550dd1d`; FK index sweep), M25 (`63fe2084`; updated_at trigger sweep). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
 - **Estimated remaining effort:** ~8–10 weeks of focused work (sum of per-phase estimates; minor savings from cross-phase dedup/absorption)
 - **P0 callouts:**
     - **DATA-C1#DATA-1** (Phase 6) — `stripe_connect_status` CHECK rejects `'disconnected'`; every Stripe disconnect raises 23514 on `core/professionals.go` → infinite webhook retries on pilot day one
@@ -245,7 +245,7 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P2 · **Effort:** ~1h · **Closes:** 3 findings
     - **Why this slot:** uses Master 20's `CREATE INDEX CONCURRENTLY` pattern; lands with the other DDL sweeps.
 
-25. **Master Pattern 25 — `updated_at` trigger backfill** (Phase 6 Pattern 9)
+25. ✅ **Master Pattern 25 — `updated_at` trigger backfill** (Phase 6 Pattern 9)
     - **Tier:** P2 · **Effort:** ~2h · **Closes:** 1 finding
     - **Why this slot:** mechanical 13-trigger migration; lands with the DDL cluster.
 
@@ -1923,12 +1923,12 @@ All three are P2/P3 perf. No current customer impact. Mechanical single-migratio
 
 ---
 
-## Master Pattern 25 — `updated_at` trigger backfill on 13 mutable tables
+## ✅ Master Pattern 25 — `updated_at` trigger backfill on 13 mutable tables
 
 **Original ID:** Phase 6 Pattern 9
 **Closes:** DATA-A2#DATA-7
 **Tier:** P2 · **Effort:** ~2h
-**Status:** Open
+**Status:** ✅ Shipped 2026-05-18
 **Depends on:** none
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1947,7 +1947,7 @@ For tables without the DB trigger, `updated_at` stays at its old value after any
 
 ### What to do
 
-- [ ] **Step 1 — Add triggers in a single migration.** Write `supabase/migrations/<timestamp>_add_updated_at_triggers.sql`:
+- [x] **Step 1 — Add triggers in a single migration.** Write `supabase/migrations/<timestamp>_add_updated_at_triggers.sql`:
     ```sql
     CREATE OR REPLACE TRIGGER set_timestamp_services
         BEFORE UPDATE ON site.services
@@ -2001,8 +2001,8 @@ For tables without the DB trigger, `updated_at` stays at its old value after any
         BEFORE UPDATE ON core.gdpr_requests
         FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
     ```
-- [ ] **Step 2 — Verify the trigger function exists.** `\df public.set_updated_at` in psql. If it doesn't (baseline drift), the migration is incomplete; locate or recreate.
-- [ ] **Step 3 — Add a CI sweep.** Write `tests/Feature/Database/UpdatedAtTriggerCoverageTest.php` that asserts every table with an `updated_at timestamptz` column has a `set_updated_at` trigger registered in `information_schema.triggers`. Catches the next omission.
+- [x] **Step 2 — Verify the trigger function exists.** `\df public.set_updated_at` in psql. If it doesn't (baseline drift), the migration is incomplete; locate or recreate.
+- [x] **Step 3 — Add a CI sweep.** Write `tests/Feature/Database/UpdatedAtTriggerCoverageTest.php` that asserts every table with an `updated_at timestamptz` column has a `set_updated_at` trigger registered in `information_schema.triggers`. Catches the next omission.
 
 ### Plain English
 
