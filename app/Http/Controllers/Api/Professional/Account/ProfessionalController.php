@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ResolveCurrentSite;
 use App\Http\Requests\Api\Professional\ProfessionalShowRequest;
 use App\Http\Requests\Api\Professional\UpdateProfessionalRequest;
 use App\Http\Resources\ProfessionalDashboardResource;
+use App\Models\Core\Professional\BrandProfile;
 use App\Models\Core\Site\Block;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Cache\SiteCacheService;
@@ -42,16 +43,22 @@ class ProfessionalController extends ApiController
         $primaryBrandName = null;
         if ($pro->site) {
             $siteSettings = is_array($pro->site->settings) ? $pro->site->settings : [];
+        }
 
-            // Resolve primary brand partner status + name so the dashboard can surface
-            // affiliate-facing banners and status dots.
-            if ($pro->professional_type !== 'brand') {
-                $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
-                if ($brandPartnerId) {
-                    $partner = $cache->getBrandPartnerStatus((string) $brandPartnerId);
-                    $primaryBrandStatus = $partner['brand_status'] ?? BrandStatus::Onboarding->value;
-                    $primaryBrandName = $partner['display_name'] ?? null;
-                }
+        // Resolve primary_brand_status so the dashboard can surface affiliate-
+        // facing banners + gate brand-only actions (e.g. "+ Add invite"). For
+        // brands this is THEIR OWN brand_profile.brand_status; for affiliates
+        // it's their connected brand partner's status.
+        if ($pro->professional_type === 'brand') {
+            $brandProfile = BrandProfile::query()->where('professional_id', $pro->id)->first();
+            $primaryBrandStatus = $brandProfile?->brand_status ?? BrandStatus::Onboarding->value;
+            $primaryBrandName = $pro->display_name;
+        } elseif (! empty($siteSettings)) {
+            $brandPartnerId = $siteSettings['brand_partner']['professional_id'] ?? null;
+            if ($brandPartnerId) {
+                $partner = $cache->getBrandPartnerStatus((string) $brandPartnerId);
+                $primaryBrandStatus = $partner['brand_status'] ?? BrandStatus::Onboarding->value;
+                $primaryBrandName = $partner['display_name'] ?? null;
             }
         }
 
