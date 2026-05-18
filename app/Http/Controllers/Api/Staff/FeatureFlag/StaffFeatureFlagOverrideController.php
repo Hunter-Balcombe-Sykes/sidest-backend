@@ -8,6 +8,7 @@ use App\Http\Resources\FeatureFlagOverrideResource;
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Services\FeatureFlags\FeatureFlagService;
+use App\Services\FeatureFlags\OverrideScope;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
