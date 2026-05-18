@@ -1,0 +1,133 @@
+<?php
+
+namespace App\Http\Controllers\Api\Internal;
+
+use App\Http\Controllers\Api\ApiController;
+use App\Mail\Auth\EmailConfirmMail;
+use App\Mail\Auth\InviteMail;
+use App\Mail\Auth\MagicLinkMail;
+use App\Mail\Auth\PasswordResetMail;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+
+/**
+ * Receives Supabase Send Email Hook events and dispatches the appropriate
+ * Partna Mailable so all auth emails ride the same Resend pipeline as our
+ * transactional mail. Signature is verified by the surrounding middleware.
+ *
+ * Payload shape (Standard Webhooks):
+ *   {
+ *     "user": { "email": "...", "user_metadata": { "full_name": "..." }, ... },
+ *     "email_data": {
+ *       "token_hash": "...",
+ *       "redirect_to": "https://app.partna.au/auth/callback",
+ *       "email_action_type": "signup" | "recovery" | "magiclink" | "invite" | ...,
+ *       "site_url": "https://...supabase.co"
+ *     }
+ *   }
+ */
+class SupabaseEmailHookController extends ApiController
+{
+    public function __invoke(Request $request): JsonResponse
+    {
+        $payload = $request->json()->all();
+
+        $user = is_array($payload['user'] ?? null) ? $payload['user'] : null;
+        $emailData = is_array($payload['email_data'] ?? null) ? $payload['email_data'] : null;
+
+        $recipientEmail = is_string($user['email'] ?? null) ? $user['email'] : null;
+        $actionType = is_string($emailData['email_action_type'] ?? null) ? $emailData['email_action_type'] : null;
+        $tokenHash = is_string($emailData['token_hash'] ?? null) ? $emailData['token_hash'] : null;
+        $siteUrl = is_string($emailData['site_url'] ?? null) ? rtrim($emailData['site_url'], '/') : null;
+        $redirectTo = is_string($emailData['redirect_to'] ?? null) ? $emailData['redirect_to'] : null;
+
+        if (! $recipientEmail || ! $actionType || ! $tokenHash || ! $siteUrl) {
+            Log::warning('supabase.email_hook.payload_invalid', [
+                'has_user' => $user !== null,
+                'has_email_data' => $emailData !== null,
+                'action' => $actionType,
+            ]);
+
+            return $this->error('Invalid payload', 422);
+        }
+
+        $verifyUrl = $this->buildVerifyUrl($siteUrl, $tokenHash, $actionType, $redirectTo);
+        $displayName = $this->resolveDisplayName($user);
+
+        try {
+            $mailable = $this->resolveMailable($actionType, $recipientEmail, $displayName, $verifyUrl);
+            if ($mailable === null) {
+                // Unsupported action type — return success so Supabase doesn't retry
+                // (it'll fall back to its built-in template). Log so we know to add support.
+                Log::info('supabase.email_hook.unhandled_action', ['action' => $actionType]);
+
+                return response()->json(['ok' => true, 'handled' => false]);
+            }
+
+            Mail::send($mailable);
+
+            return response()->json(['ok' => true, 'handled' => true]);
+        } catch (\Throwable $e) {
+            Log::error('supabase.email_hook.send_failed', [
+                'action' => $actionType,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->error('Failed to send email', 500);
+        }
+    }
+
+    /**
+     * Builds the Supabase verify endpoint URL. Clicking this hits
+     * `{site_url}/auth/v1/verify?token=...&type=...&redirect_to=...`, which
+     * exchanges the token, establishes a session, and 302s to redirect_to.
+     */
+    private function buildVerifyUrl(string $siteUrl, string $tokenHash, string $actionType, ?string $redirectTo): string
+    {
+        $params = [
+            'token' => $tokenHash,
+            'type' => $actionType,
+        ];
+        if ($redirectTo !== null && $redirectTo !== '') {
+            $params['redirect_to'] = $redirectTo;
+        }
+
+        return $siteUrl.'/auth/v1/verify?'.http_build_query($params);
+    }
+
+    /**
+     * @param  array<string, mixed>  $user
+     */
+    private function resolveDisplayName(array $user): ?string
+    {
+        $meta = is_array($user['user_metadata'] ?? null) ? $user['user_metadata'] : [];
+
+        foreach (['full_name', 'name', 'first_name'] as $key) {
+            $value = $meta[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $first = explode(' ', trim($value))[0];
+
+                return $first;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveMailable(
+        string $actionType,
+        string $recipientEmail,
+        ?string $displayName,
+        string $verifyUrl,
+    ): ?\App\Mail\BaseTransactionalMail {
+        return match ($actionType) {
+            'recovery' => new PasswordResetMail($recipientEmail, $displayName, $verifyUrl),
+            'magiclink' => new MagicLinkMail($recipientEmail, $displayName, $verifyUrl),
+            'signup', 'email_change', 'email_change_current', 'email_change_new' => new EmailConfirmMail($recipientEmail, $displayName, $verifyUrl),
+            'invite' => new InviteMail($recipientEmail, $displayName, $verifyUrl),
+            default => null,
+        };
+    }
+}

@@ -1,0 +1,218 @@
+<?php
+
+use App\Mail\Auth\EmailConfirmMail;
+use App\Mail\Auth\InviteMail;
+use App\Mail\Auth\MagicLinkMail;
+use App\Mail\Auth\PasswordResetMail;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Mail;
+
+beforeEach(function (): void {
+    Mail::fake();
+});
+
+/**
+ * Build a request that Standard-Webhooks would produce. The secret is a
+ * known constant so we can pre-compute the matching HMAC.
+ *
+ * @param  array<string, mixed>  $payload
+ * @return array{headers: array<string, string>, body: string}
+ */
+function makeSupabaseHookRequest(array $payload, ?string $rawBody = null): array
+{
+    // Raw bytes the test uses as the signing key. `v1,whsec_<base64>` is what
+    // Supabase actually emits; we decode it back to these bytes in the verifier.
+    $secretBytes = 'partna-test-secret-bytes-32-chars!';
+    $configuredSecret = 'v1,whsec_'.base64_encode($secretBytes);
+    Config::set('services.supabase.email_hook_secret', $configuredSecret);
+
+    $webhookId = 'msg_'.bin2hex(random_bytes(8));
+    $webhookTimestamp = (string) time();
+    $body = $rawBody ?? json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+    $signedPayload = $webhookId.'.'.$webhookTimestamp.'.'.$body;
+    $signature = base64_encode(hash_hmac('sha256', $signedPayload, $secretBytes, true));
+
+    return [
+        'headers' => [
+            'webhook-id' => $webhookId,
+            'webhook-timestamp' => $webhookTimestamp,
+            'webhook-signature' => 'v1,'.$signature,
+            'Content-Type' => 'application/json',
+        ],
+        'body' => $body,
+    ];
+}
+
+it('dispatches PasswordResetMail for recovery action', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'tobias@partna.au', 'user_metadata' => ['full_name' => 'Tobias E.']],
+        'email_data' => [
+            'token_hash' => 'pkce_abc123',
+            'redirect_to' => 'https://app.partna.au/auth/callback',
+            'email_action_type' => 'recovery',
+            'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    expect($response->json('ok'))->toBeTrue();
+    expect($response->json('handled'))->toBeTrue();
+
+    Mail::assertSent(PasswordResetMail::class, function (PasswordResetMail $m): bool {
+        return $m->recipientEmail === 'tobias@partna.au'
+            && $m->displayName === 'Tobias'
+            && str_contains($m->verifyUrl, '/auth/v1/verify')
+            && str_contains($m->verifyUrl, 'token=pkce_abc123')
+            && str_contains($m->verifyUrl, 'type=recovery');
+    });
+});
+
+it('dispatches MagicLinkMail for magiclink action', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'login@partna.au', 'user_metadata' => []],
+        'email_data' => [
+            'token_hash' => 'tok_xyz',
+            'email_action_type' => 'magiclink',
+            'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    Mail::assertSent(MagicLinkMail::class);
+});
+
+it('dispatches EmailConfirmMail for signup action', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'newby@partna.au', 'user_metadata' => ['name' => 'Newby']],
+        'email_data' => [
+            'token_hash' => 'tok_signup',
+            'email_action_type' => 'signup',
+            'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    Mail::assertSent(EmailConfirmMail::class);
+});
+
+it('dispatches InviteMail for invite action', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'invitee@partna.au'],
+        'email_data' => [
+            'token_hash' => 'tok_invite',
+            'email_action_type' => 'invite',
+            'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    Mail::assertSent(InviteMail::class);
+});
+
+it('returns 200 with handled=false for unknown action type (no retry)', function (): void {
+    $req = makeSupabaseHookRequest([
+        'user' => ['email' => 'x@partna.au'],
+        'email_data' => [
+            'token_hash' => 'tok_unknown',
+            'email_action_type' => 'reauthentication',
+            'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co',
+        ],
+    ]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    $response->assertOk();
+    expect($response->json('handled'))->toBeFalse();
+    Mail::assertNothingSent();
+});
+
+it('rejects requests with an invalid signature (401)', function (): void {
+    Config::set('services.supabase.email_hook_secret', 'v1,whsec_'.base64_encode('partna-test-secret-bytes-32-chars!'));
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => 'msg_xxx',
+        'HTTP_webhook-timestamp' => (string) time(),
+        'HTTP_webhook-signature' => 'v1,not-the-right-signature',
+        'CONTENT_TYPE' => 'application/json',
+    ], json_encode(['user' => ['email' => 'x@partna.au'], 'email_data' => ['email_action_type' => 'recovery']]));
+
+    expect($response->status())->toBe(401);
+    Mail::assertNothingSent();
+});
+
+it('returns 503 when the secret is not configured', function (): void {
+    Config::set('services.supabase.email_hook_secret', '');
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => 'msg_xxx',
+        'HTTP_webhook-timestamp' => (string) time(),
+        'HTTP_webhook-signature' => 'v1,anything',
+        'CONTENT_TYPE' => 'application/json',
+    ], '{}');
+
+    expect($response->status())->toBe(503);
+});
+
+it('rejects timestamps outside the tolerance window (401)', function (): void {
+    $req = makeSupabaseHookRequest(
+        ['user' => ['email' => 'x@partna.au'], 'email_data' => ['email_action_type' => 'recovery', 'token_hash' => 't', 'site_url' => 'https://glncumufgaqcmqhzwrxm.supabase.co']],
+    );
+    // Override timestamp to 10 minutes ago — well outside the 5-minute window.
+    $stale = (string) (time() - 600);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $stale,
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    expect($response->status())->toBe(401);
+});
+
+it('returns 422 when the payload is missing required fields', function (): void {
+    $req = makeSupabaseHookRequest(['user' => [], 'email_data' => []]);
+
+    $response = $this->call('POST', '/api/internal/email-hooks/supabase', [], [], [], [
+        'HTTP_webhook-id' => $req['headers']['webhook-id'],
+        'HTTP_webhook-timestamp' => $req['headers']['webhook-timestamp'],
+        'HTTP_webhook-signature' => $req['headers']['webhook-signature'],
+        'CONTENT_TYPE' => 'application/json',
+    ], $req['body']);
+
+    expect($response->status())->toBe(422);
+});

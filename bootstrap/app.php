@@ -6,6 +6,7 @@ use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\VerifyShopifySessionToken;
+use App\Http\Middleware\Auth\VerifySupabaseEmailHookSignature;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Http\Middleware\BrandFundingGate;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
@@ -87,6 +88,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
             'shopify.session' => VerifyShopifySessionToken::class,
+            'supabase.email-hook' => VerifySupabaseEmailHookSignature::class,
             'feature' => FeatureGate::class,
             'captcha' => VerifyTurnstileCaptcha::class,
             'brand-funding-gate' => BrandFundingGate::class,

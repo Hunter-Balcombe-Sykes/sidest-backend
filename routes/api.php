@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Internal\HydrogenAffiliateProductsController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandConfigController;
 use App\Http\Controllers\Api\Internal\HydrogenBrandDesignController;
 use App\Http\Controllers\Api\Internal\HydrogenDeploymentController;
+use App\Http\Controllers\Api\Internal\SupabaseEmailHookController;
 use App\Http\Controllers\Api\PublicSite\AnalyticsController;
 use App\Http\Controllers\Api\PublicSite\BootstrapController;
 use App\Http\Controllers\Api\PublicSite\PublicBookingController;
@@ -69,6 +70,13 @@ Route::middleware('throttle:webhooks')->group(function () {
     Route::post('/webhooks/stripe-platform', StripePlatformWebhookController::class);
     Route::post('/webhooks/stripe-platform-thin', [StripePlatformWebhookController::class, 'thin']);
     Route::post('/webhooks/stripe', StripeWebhookController::class);
+
+    // Supabase Send Email Hook — receives auth-email events (password reset,
+    // magic link, signup confirm, invite) and dispatches our own Mailable so
+    // every Partna email rides the same Resend pipeline + universal template.
+    // HMAC verified by middleware; rate-limited under the webhooks bucket.
+    Route::post('/internal/email-hooks/supabase', SupabaseEmailHookController::class)
+        ->middleware('supabase.email-hook');
     Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)
