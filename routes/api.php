@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\Webhooks\SquareCatalogWebhookController;
 use App\Http\Controllers\Api\Webhooks\Stripe\StripeConnectWebhookController;
 use App\Http\Controllers\Api\Webhooks\Stripe\StripePlatformWebhookController;
 use App\Http\Controllers\Api\Webhooks\Stripe\StripeWebhookController;
+use App\Http\Controllers\Api\Webhooks\SupabaseAuthHookController;
 use Illuminate\Support\Facades\Route;
 
 // TODO(v1): all routes below should be prefixed /v1/ once frontend is ready for the migration
@@ -77,6 +78,13 @@ Route::middleware('throttle:webhooks')->group(function () {
     // HMAC verified by middleware; rate-limited under the webhooks bucket.
     Route::post('/internal/email-hooks/supabase', SupabaseEmailHookController::class)
         ->middleware('supabase.email-hook');
+
+    // Supabase Auth Hooks — signature-gated, unauthenticated.
+    // Configure URL in Supabase Dashboard → Authentication → Hooks → MFA Verification.
+    Route::post(
+        '/webhooks/supabase/auth/mfa-verification',
+        [SupabaseAuthHookController::class, 'mfaVerification'],
+    )->name('webhooks.supabase.auth.mfa-verification');
     Route::post('/webhooks/shopify/orders', ShopifyOrderWebhookController::class)
         ->middleware('throttle:shopify-webhooks');
     Route::post('/webhooks/shopify/orders-paid', ShopifyOrderWebhookController::class)
