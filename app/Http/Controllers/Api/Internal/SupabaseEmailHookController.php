@@ -81,12 +81,18 @@ class SupabaseEmailHookController extends ApiController
 
     /**
      * Builds the Supabase verify endpoint URL. Clicking this hits
-     * `{site_url}/auth/v1/verify?token=...&type=...&redirect_to=...`, which
-     * exchanges the token, establishes a session, and 302s to redirect_to.
+     * `{site_url}/auth/v1/verify?apikey=...&token=...&type=...&redirect_to=...`,
+     * which exchanges the token, establishes a session, and 302s to redirect_to.
+     *
+     * The `apikey` param is the public anon key — Supabase's verify endpoint
+     * rejects the request with a "No API key found in request" error without it.
+     * The anon key is already public (it ships in the frontend bundle), so
+     * embedding it in the email link is safe.
      */
     private function buildVerifyUrl(string $siteUrl, string $tokenHash, string $actionType, ?string $redirectTo): string
     {
         $params = [
+            'apikey' => (string) config('services.supabase.anon_key', ''),
             'token' => $tokenHash,
             'type' => $actionType,
         ];

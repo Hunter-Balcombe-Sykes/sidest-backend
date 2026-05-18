@@ -36,6 +36,10 @@ return [
     // the hook endpoint returns 503 (fail-closed).
     'supabase' => [
         'email_hook_secret' => env('SUPABASE_EMAIL_HOOK_SECRET'),
+        // Public anon key — required as the `apikey` query param on links to
+        // {site_url}/auth/v1/verify. Already used elsewhere in the app
+        // (frontend bundle) so it's safe to embed in outbound email URLs.
+        'anon_key' => env('SUPABASE_ANON_KEY'),
     ],
 
     'ses' => [
