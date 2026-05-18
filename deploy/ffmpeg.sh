@@ -13,7 +13,12 @@
 # Cloud reuses a cached builder layer).
 set -euo pipefail
 
-INSTALL_DIR="${HOME}/bin/ffmpeg"
+# Install relative to the script's location so the binary lands inside the
+# repo root (e.g. <repo>/bin/ffmpeg) and gets bundled into the runtime image
+# at /var/www/html/bin/ffmpeg/. $HOME in the builder is /var/www (outside the
+# repo) so anything written there is discarded.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALL_DIR="${REPO_ROOT}/bin/ffmpeg"
 FFMPEG_BIN="${INSTALL_DIR}/ffmpeg"
 ARCH="$(uname -m)"
 

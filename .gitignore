@@ -45,3 +45,6 @@ Thumbs.db
 boost.json
 .claude/
 claude-overnight.log
+
+# ffmpeg binaries installed by deploy/ffmpeg.sh at build time
+/bin/
