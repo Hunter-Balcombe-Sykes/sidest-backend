@@ -47,7 +47,7 @@ use Illuminate\Support\Facades\Route;
 
 // Authorised Staff Viewing
 Route::prefix('staff')
-    ->middleware(['supabase.jwt', 'staff', 'throttle:staff'])
+    ->middleware(['supabase.jwt', 'staff', 'throttle:staff', 'staff.audit'])
     ->whereUuid('professional')
     ->scopeBindings()
     ->group(function () {
@@ -222,7 +222,7 @@ Route::prefix('staff')
 
 // Authorised Staff Admin Editing
 Route::prefix('staff')
-    ->middleware(['supabase.jwt', 'staff', 'staff.admin', 'throttle:staff'])
+    ->middleware(['supabase.jwt', 'staff', 'staff.admin', 'throttle:staff', 'staff.audit'])
     ->whereUuid('professional')
     ->scopeBindings()
     ->group(function () {

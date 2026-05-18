@@ -53,6 +53,12 @@ const POLICY_EXEMPT = [
     // CRUD endpoints. Rows are written as side-effects of handle renames,
     // never directly by professionals.
     \App\Models\Core\Site\ProfessionalHandleAlias::class,
+
+    // OPS-2: Append-only staff audit log. Never exposed over the API — support
+    // queries via SQL only. No tenant ownership; staff actor and target professional
+    // are FK metadata, not authorization keys. A Policy class would be meaningless
+    // here because there is no controller action to gate.
+    \App\Models\Core\Staff\StaffAuditEntry::class,
 ];
 
 it('every tenant-owned model has a registered policy', function () {

@@ -11,6 +11,7 @@ use App\Http\Middleware\BrandFundingGate;
 use App\Http\Middleware\Context\LoadCurrentProfessional;
 use App\Http\Middleware\FeatureGate;
 use App\Http\Middleware\Logging\LogLeadRateLimits;
+use App\Http\Middleware\Logging\RecordStaffAuditEntry;
 use App\Http\Middleware\RequirePlan;
 use App\Http\Middleware\SecureHeaders;
 use App\Http\Middleware\VerifyTurnstileCaptcha;
@@ -81,6 +82,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'current.pro' => LoadCurrentProfessional::class,
             'staff' => EnsurePartnaStaff::class,
             'staff.admin' => EnsurePartnaAdmin::class,
+            'staff.audit' => RecordStaffAuditEntry::class,
             'lead.log' => LogLeadRateLimits::class,
             'plan' => RequirePlan::class,
             'hydrogen.key' => VerifyHydrogenApiKey::class,
