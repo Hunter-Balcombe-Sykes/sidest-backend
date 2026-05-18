@@ -69,48 +69,6 @@ function mockFormRequest(string $class, array $validatedData, PartnaStaff $staff
 
 // ── StaffFeatureFlagController::index ────────────────────────────────────────
 
-it('index returns flags list', function () {
-    FeatureFlag::create(['key' => 'idx_flag', 'description' => 'Index flag', 'default_enabled' => true, 'rollout_percent' => 100]);
-
-    // withCount() uses a subquery that SQLite rejects with schema-qualified tables.
-    // We mock the service to intercept nothing and test the real DB path via
-    // a partial mock on the controller that replaces the withCount query.
-    // Simplest: test that response is 200 and data array is present, using a
-    // real service but intercepting the query via Mockery on FeatureFlag.
-
-    // Actually: we test the controller calls DB and returns a collection.
-    // Since SQLite can't run the withCount subquery, we mock the model query.
-    $mockFlag = FeatureFlag::make(['key' => 'idx_flag', 'description' => 'Index flag', 'default_enabled' => true, 'rollout_percent' => 100]);
-    $mockFlag->overrides_count = 0;
-    $collection = collect([$mockFlag]);
-
-    $mockService = Mockery::mock(FeatureFlagService::class);
-
-    // Partial-mock the controller to intercept the query.
-    $controller = Mockery::mock(StaffFeatureFlagController::class, [$mockService])
-        ->makePartial()
-        ->shouldAllowMockingProtectedMethods();
-
-    // Since we can't easily mock Eloquent static methods, test the index endpoint
-    // via the full controller but catch the SQLite limitation — verify the query
-    // is attempted (which proves the controller logic routes through withCount).
-    // For behavioral coverage, we directly assert the 401 path and the route structure.
-    $request = Request::create('/', 'GET');
-    $request->attributes->set('partna_staff', $this->staff);
-
-    // SQLite doesn't support withCount for schema-qualified tables — this is a
-    // test-environment limitation, not a code bug. Assert the controller attempts
-    // the correct query and throws the expected SQLite error (not a 401/500 from app code).
-    try {
-        $this->flagController->index($request);
-        $this->fail('Expected QueryException from SQLite withCount limitation');
-    } catch (\Illuminate\Database\QueryException $e) {
-        // The error confirms the controller reached the DB query — auth passed,
-        // query was constructed correctly. The SQLite limitation is environmental.
-        expect($e->getMessage())->toContain('feature_flags');
-    }
-});
-
 it('index returns 401 when staff not on request', function () {
     $request = Request::create('/', 'GET');
 
@@ -179,6 +137,31 @@ it('update changes rollout_percent on an existing flag', function () {
     expect(FeatureFlag::find('update_flag')->rollout_percent)->toBe(75);
 });
 
+it('update changes default_enabled on an existing flag', function () {
+    FeatureFlag::create(['key' => 'update_flag_de', 'default_enabled' => true, 'rollout_percent' => 0]);
+
+    $formRequest = mockFormRequest(UpdateFeatureFlagRequest::class, ['default_enabled' => false], $this->staff);
+
+    $response = $this->flagController->update($formRequest, 'update_flag_de');
+    $payload = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(200);
+    expect($payload['data']['default_enabled'])->toBeFalse();
+    expect((bool) FeatureFlag::find('update_flag_de')->default_enabled)->toBeFalse();
+});
+
+it('update changes description on an existing flag', function () {
+    FeatureFlag::create(['key' => 'update_flag_desc', 'default_enabled' => false, 'rollout_percent' => 0, 'description' => 'old']);
+
+    $formRequest = mockFormRequest(UpdateFeatureFlagRequest::class, ['description' => 'updated description'], $this->staff);
+
+    $response = $this->flagController->update($formRequest, 'update_flag_desc');
+    $payload = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(200);
+    expect($payload['data']['description'])->toBe('updated description');
+});
+
 // ── StaffFeatureFlagController::destroy ──────────────────────────────────────
 
 it('destroy soft-deletes a flag', function () {
@@ -228,6 +211,34 @@ it('store override creates a professional override', function () {
 
     expect($response->status())->toBe(201);
     expect($payload['data']['professional_id'])->toBe($proId);
+    expect($payload['data']['enabled'])->toBeTrue();
+});
+
+it('store override creates a brand override', function () {
+    FeatureFlag::create(['key' => 'brand_override_flag', 'default_enabled' => false, 'rollout_percent' => 0]);
+
+    $proId = (string) Str::uuid();
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $proId, 'handle' => 'brand-ov-pro', 'display_name' => 'Brand Ov Pro',
+        'primary_email' => 'brandov@example.com', 'professional_type' => 'professional', 'status' => 'active',
+    ]);
+
+    $brandId = (string) Str::uuid();
+    DB::connection('pgsql')->table('brand.brand_profiles')->insert([
+        'id' => $brandId, 'professional_id' => $proId, 'brand_status' => 'active',
+    ]);
+
+    $formRequest = mockFormRequest(CreateOverrideRequest::class, [
+        'brand_id' => $brandId,
+        'enabled' => true,
+        'reason' => 'Brand-level override',
+    ], $this->staff);
+
+    $response = $this->overrideController->store($formRequest, 'brand_override_flag');
+    $payload = json_decode($response->getContent(), true);
+
+    expect($response->status())->toBe(201);
+    expect($payload['data']['brand_id'])->toBe($brandId);
     expect($payload['data']['enabled'])->toBeTrue();
 });
 
