@@ -61,17 +61,23 @@ it('rejects booking section via Square integration when smart_booking flag is of
     expect($reason)->toContain('booking link');
 });
 
-it('allows booking section via Square integration when smart_booking flag is on', function () {
+it('still rejects booking section via Square integration when smart_booking flag is on (feature dropped)', function () {
+    // Smart-booking (Square/Fresha integration) was dropped in 2d9d3a25 — the config
+    // flag is no longer read. professionalHasBookingIntegration() hard-returns false,
+    // so a Square integration alone never satisfies the booking-visibility requirement
+    // regardless of the flag value. Only the manual booking_url path or a booking-link
+    // block makes the section visible (covered by the two tests below).
     config()->set('partna.features.smart_booking', true);
 
     [$proId, $siteId] = seedProAndSite();
     seedActiveService($proId);
     seedSquareIntegration($proId);
 
-    [$canBeVisible] = app(SectionVisibilityService::class)
+    [$canBeVisible, $reason] = app(SectionVisibilityService::class)
         ->checkVisibilityRequirements($proId, $siteId, 'booking');
 
-    expect($canBeVisible)->toBeTrue();
+    expect($canBeVisible)->toBeFalse();
+    expect($reason)->toContain('booking link');
 });
 
 it('allows booking section via booking link block', function () {

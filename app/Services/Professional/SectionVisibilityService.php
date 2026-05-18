@@ -3,7 +3,6 @@
 namespace App\Services\Professional;
 
 use App\Models\Core\Professional\Professional;
-use App\Models\Core\Professional\ProfessionalIntegration;
 use App\Models\Core\Professional\Service;
 use App\Models\Core\Site\Block;
 use App\Models\Core\Site\SiteMedia;
@@ -157,16 +156,8 @@ class SectionVisibilityService
                 ->whereNull('deleted_at')
                 ->getQuery();
 
-            if ($smartBookingEnabled) {
-                $subqueries['has_booking_integration'] = ProfessionalIntegration::query()
-                    ->select(DB::raw('1'))
-                    ->where('professional_id', $professionalId)
-                    ->whereIn('provider', [
-                        ProfessionalIntegration::PROVIDER_SQUARE,
-                        ProfessionalIntegration::PROVIDER_FRESHA,
-                    ])
-                    ->getQuery();
-            }
+            // Smart-booking (Square/Fresha integration) was dropped — has_booking_integration
+            // is always false, set in the post-loop block below. No subquery needed here.
 
             $subqueries['has_booking_link_block'] = Block::query()
                 ->select(DB::raw('1'))
@@ -210,8 +201,8 @@ class SectionVisibilityService
         }
 
         if (empty($subqueries)) {
-            // Smart-booking off + booking section present is handled below.
-            if ($needsBooking && ! $smartBookingEnabled) {
+            // Booking section present + smart-booking dropped → integration is always false.
+            if ($needsBooking) {
                 $defaults['has_booking_integration'] = false;
             }
 
@@ -235,7 +226,10 @@ class SectionVisibilityService
             }
         }
 
-        if ($needsBooking && ! $smartBookingEnabled) {
+        // Smart-booking dropped → has_booking_integration always false for any site
+        // that exposes the booking section. (The subquery branch above no longer fetches
+        // it, so this is the sole writer.)
+        if ($needsBooking) {
             $defaults['has_booking_integration'] = false;
         }
 
