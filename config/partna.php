@@ -1,6 +1,11 @@
 <?php
 
 return [
+    // Shared-secret token for GET /api/internal/env-check. Required to enable
+    // the endpoint. When unset, the endpoint returns 503 — fail-closed by default
+    // so a fresh deploy never accidentally exposes the env-var report.
+    'internal_env_check_token' => env('INTERNAL_ENV_CHECK_TOKEN'),
+
     'public_domain' => env(
         'PARTNA_PUBLIC_DOMAIN',
         env(
