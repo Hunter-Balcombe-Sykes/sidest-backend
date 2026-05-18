@@ -1015,9 +1015,14 @@ return [
          * controller surfaces these with mandatory=true so the frontend can
          * render them as read-only "always on" toggles.
          */
+        // commissions + payouts used to live here as mandatory transactional
+        // categories. The product chose to surface them as opt-in toggles
+        // instead — the in-app notifications still always fire (so users
+        // never miss money movement on the dashboard), only the EMAIL copy
+        // is now silenceable. subscriptions + brand_status stay mandatory:
+        // billing/account-state mail is contract-performance under GDPR
+        // Art. 6(1)(b) and transactional-primary-purpose under CAN-SPAM §316.3.
         'mandatory_categories' => [
-            'commissions',
-            'payouts',
             'subscriptions',
             'brand_status',
         ],
@@ -1149,7 +1154,7 @@ return [
         | the window. This is enforced BEFORE Supabase accepts the verify,
         | so the session never reaches aal2 from a brute-force attempt.
         */
-        'verify_max_failures'  => (int) env('SIDEST_MFA_VERIFY_MAX_FAILURES', 5),
+        'verify_max_failures' => (int) env('SIDEST_MFA_VERIFY_MAX_FAILURES', 5),
         'verify_failure_window_seconds' => (int) env('SIDEST_MFA_VERIFY_WINDOW_SECONDS', 300),
     ],
 
