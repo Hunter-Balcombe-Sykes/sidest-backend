@@ -4,10 +4,6 @@ use App\Http\Middleware\Auth\VerifySupabaseJwt;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Tests\TestCase;
-
-uses(TestCase::class);
-
 // Build a minimal test JWT. Uses HS256 so the JWKS path always rejects it,
 // forcing the Auth-Server fallback path. Claims are readable in the payload.
 function makeMfaTestJwt(array $claims = []): string
