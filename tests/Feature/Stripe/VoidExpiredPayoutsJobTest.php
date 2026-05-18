@@ -1,11 +1,14 @@
 <?php
 
+use App\Jobs\Notifications\SendTransactionalNotificationEmailJob;
 use App\Jobs\Stripe\VoidExpiredPayoutsJob;
 use App\Models\Commerce\CommissionPayout;
 use App\Models\Commerce\Order;
 use App\Models\Commerce\OrderEvent;
 use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 
@@ -89,6 +92,43 @@ beforeEach(function () {
         } catch (\Throwable) {
         }
     }
+
+    // Unified-pipeline target: NotificationPublisher writes here; SendTransactionalNotificationEmailJob
+    // dispatches off newly-inserted rows. Schema mirrors the canonical migration columns.
+    try {
+        $conn->statement("ATTACH DATABASE ':memory:' AS notifications");
+    } catch (\Throwable) {
+    }
+    $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notifications (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NULL,
+        type TEXT NOT NULL,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        cta_url TEXT NULL,
+        primary_action_label TEXT NULL,
+        secondary_action_label TEXT NULL,
+        secondary_action_url TEXT NULL,
+        severity TEXT NULL,
+        starts_at TEXT NULL,
+        ends_at TEXT NULL,
+        dedupe_key TEXT NULL,
+        email_sent_at TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )');
+    $conn->statement(
+        'CREATE UNIQUE INDEX IF NOT EXISTS notifications.notifications_dedupe_key_per_pro_uq
+         ON notifications (professional_id, dedupe_key)
+         WHERE dedupe_key IS NOT NULL'
+    );
+
+    // Tests using the real publisher want a clean Bus to assert email dispatches.
+    Bus::fake();
+
+    // Email path off by default; tests that exercise it flip it on themselves.
+    Config::set('partna.notifications.email_enabled', false);
 });
 
 function expiredPayout_seedAffiliate(string $id, string $stripeStatus = 'not_connected'): void
@@ -194,6 +234,15 @@ function expiredPayout_makeService(): CommissionVoidService
     return new CommissionVoidService($publisher);
 }
 
+// Real NotificationPublisher used by the job's grace-warning path. Tests that
+// don't care about the warning side just pass the result through; tests that
+// DO care construct a fresh real publisher and inspect rows in
+// notifications.notifications afterwards.
+function expiredPayout_makePublisher(): NotificationPublisher
+{
+    return new NotificationPublisher;
+}
+
 it('voids expired payouts when affiliate has not connected Stripe', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
@@ -201,7 +250,7 @@ it('voids expired payouts when affiliate has not connected Stripe', function () 
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved', 6000);
     expiredPayout_seedLinkedOrder('o2', 'p1', 'approved', 4000);
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
     $payout = CommissionPayout::find('p1');
     expect($payout->status)->toBe('cancelled');
@@ -223,7 +272,7 @@ it('does not void expired payouts when affiliate has active Stripe', function ()
     expiredPayout_seedPayout('p1', voidAt: now()->subDay()->toDateTimeString());
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
     expect(CommissionPayout::find('p1')->status)->toBe('pending');
     expect(Order::find('o1')->status)->toBe('approved');
@@ -235,7 +284,7 @@ it('does not void payouts still within their grace period', function () {
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString());
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
     expect(CommissionPayout::find('p1')->status)->toBe('pending');
     expect(Order::find('o1')->status)->toBe('approved');
@@ -247,7 +296,7 @@ it('leaves completed payouts alone even if void_at is in the past', function () 
     expiredPayout_seedPayout('p1', voidAt: now()->subDays(60)->toDateTimeString(), status: 'completed');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
     expect(CommissionPayout::find('p1')->status)->toBe('completed');
     expect(Order::find('o1')->status)->toBe('approved');
@@ -272,7 +321,7 @@ it('publishes a voided notification to the affiliate when their payout expires',
         );
 
     $service = new CommissionVoidService($publisher);
-    expiredPayout_makeJob()->handle($service);
+    expiredPayout_makeJob()->handle($service, expiredPayout_makePublisher());
 });
 
 // ============================================================
@@ -290,7 +339,7 @@ it('does not cancel payout or void linked orders when status changed to processi
         ->where('id', 'p1')
         ->update(['status' => 'processing']);
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
     expect(CommissionPayout::find('p1')->status)->toBe('processing');
     expect(Order::find('o1')->status)->toBe('approved');
@@ -351,8 +400,8 @@ it('publishes notification only once when the same expired payout is processed o
 
     $service = new CommissionVoidService($publisher);
     $job = expiredPayout_makeJob();
-    $job->handle($service);
-    $job->handle($service);
+    $job->handle($service, expiredPayout_makePublisher());
+    $job->handle($service, expiredPayout_makePublisher());
 });
 
 // ============================================================
@@ -364,23 +413,44 @@ it('publishes notification only once when the same expired payout is processed o
 // under v2 the retry loop is gone, so void_at is stable and is the right anchor.
 // ============================================================
 
-it('fires a T-30 grace warning when void_at is 30 days away', function () {
+it('publishes a T-30 grace warning row to the affiliate when void_at is 30 days away', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
 
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertSentTo(
-        \App\Models\Core\Professional\Professional::find('aff-1'),
-        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
-        fn ($n) => $n->daysRemaining === 30
-    );
+    $row = DB::table('notifications.notifications')
+        ->where('professional_id', 'aff-1')
+        ->where('dedupe_key', 'payout_warning.p1.t-30')
+        ->first();
 
-    $payout = \App\Models\Commerce\CommissionPayout::find('p1');
+    expect($row)->not->toBeNull();
+    expect($row->category)->toBe('payout_warnings');
+    expect($row->type)->toBe('Warning');
+    expect($row->cta_url)->toBe('/affiliate/stripe/connect');
+    expect($row->title)->toContain('30 days');
+
+    $payout = CommissionPayout::find('p1');
     expect($payout->grace_notifications_sent)->toContain('T-30');
+});
+
+it('dispatches the unified email job when email is enabled', function () {
+    Config::set('partna.notifications.email_enabled', true);
+
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'not_connected');
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
+
+    Bus::assertDispatched(
+        SendTransactionalNotificationEmailJob::class,
+        fn ($job) => true,
+    );
 });
 
 it('does not re-fire a grace warning if T-30 already recorded in grace_notifications_sent', function () {
@@ -391,12 +461,9 @@ it('does not re-fire a grace warning if T-30 already recorded in grace_notificat
     ]);
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertNotSentTo(
-        \App\Models\Core\Professional\Professional::find('aff-1'),
-        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class
-    );
+    expect(DB::table('notifications.notifications')->where('category', 'payout_warnings')->count())->toBe(0);
 });
 
 it('does not send a grace warning when affiliate already has active Stripe Connect', function () {
@@ -405,9 +472,9 @@ it('does not send a grace warning when affiliate already has active Stripe Conne
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(30)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertNothingSent();
+    expect(DB::table('notifications.notifications')->where('category', 'payout_warnings')->count())->toBe(0);
 });
 
 it('does not send a grace warning when void_at is far in the future (not yet in any warning window)', function () {
@@ -417,9 +484,9 @@ it('does not send a grace warning when void_at is far in the future (not yet in 
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(45)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertNothingSent();
+    expect(DB::table('notifications.notifications')->where('category', 'payout_warnings')->count())->toBe(0);
 });
 
 it('fires T-7 when void_at is 7 days away', function () {
@@ -428,26 +495,56 @@ it('fires T-7 when void_at is 7 days away', function () {
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(7)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertSentTo(
-        \App\Models\Core\Professional\Professional::find('aff-1'),
-        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
-        fn ($n) => $n->daysRemaining === 7
-    );
+    $row = DB::table('notifications.notifications')
+        ->where('professional_id', 'aff-1')
+        ->where('dedupe_key', 'payout_warning.p1.t-7')
+        ->first();
+
+    expect($row)->not->toBeNull();
+    expect($row->type)->toBe('Warning');
+    expect($row->title)->toContain('7 days');
 });
 
-it('fires T-1 when void_at is 1 day away', function () {
+it('fires T-1 with Critical severity when void_at is 1 day away', function () {
     expiredPayout_seedBrand('brand-1');
     expiredPayout_seedAffiliate('aff-1', 'not_connected');
     expiredPayout_seedPayout('p1', voidAt: now()->addDays(1)->toDateTimeString(), status: 'pending');
     expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
 
-    expiredPayout_makeJob()->handle(expiredPayout_makeService());
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
 
-    Notification::assertSentTo(
-        \App\Models\Core\Professional\Professional::find('aff-1'),
-        \App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification::class,
-        fn ($n) => $n->daysRemaining === 1
-    );
+    $row = DB::table('notifications.notifications')
+        ->where('professional_id', 'aff-1')
+        ->where('dedupe_key', 'payout_warning.p1.t-1')
+        ->first();
+
+    expect($row)->not->toBeNull();
+    expect($row->type)->toBe('Critical');
+    expect($row->title)->toMatch('/(tomorrow|24 hours|final)/i');
+});
+
+it('routes a brand-side failure-code warning to the brand, not the affiliate', function () {
+    expiredPayout_seedBrand('brand-1');
+    expiredPayout_seedAffiliate('aff-1', 'active'); // active — affiliate cannot fix, brand must
+    expiredPayout_seedPayout('p1', voidAt: now()->addDays(7)->toDateTimeString(), status: 'pending', overrides: [
+        'failure_code' => 'brand_payment_method_missing',
+    ]);
+    expiredPayout_seedLinkedOrder('o1', 'p1', 'approved');
+
+    expiredPayout_makeJob()->handle(expiredPayout_makeService(), expiredPayout_makePublisher());
+
+    $brandRow = DB::table('notifications.notifications')
+        ->where('professional_id', 'brand-1')
+        ->where('category', 'payout_warnings')
+        ->first();
+    expect($brandRow)->not->toBeNull();
+    expect($brandRow->cta_url)->toBe('/account/settings?section=stripe');
+
+    $affRow = DB::table('notifications.notifications')
+        ->where('professional_id', 'aff-1')
+        ->where('category', 'payout_warnings')
+        ->first();
+    expect($affRow)->toBeNull();
 });

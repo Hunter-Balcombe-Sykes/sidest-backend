@@ -3,8 +3,7 @@
 namespace App\Jobs\Stripe;
 
 use App\Models\Commerce\CommissionPayout;
-use App\Notifications\Affiliate\AffiliatePayoutGraceWarningNotification;
-use App\Notifications\Brand\BrandPayoutFundingGraceWarningNotification;
+use App\Services\Notifications\NotificationPublisher;
 use App\Services\Stripe\CommissionVoidService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -43,9 +42,9 @@ class VoidExpiredPayoutsJob implements ShouldQueue
         return [60, 180];
     }
 
-    public function handle(CommissionVoidService $voidService): void
+    public function handle(CommissionVoidService $voidService, NotificationPublisher $publisher): void
     {
-        $this->fireGraceWarnings();
+        $this->fireGraceWarnings($publisher);
 
         $stats = $voidService->processExpiredPayouts();
 
@@ -60,25 +59,17 @@ class VoidExpiredPayoutsJob implements ShouldQueue
     }
 
     /**
-     * Send T-30/T-7/T-1 grace warnings to affiliates who haven't connected Stripe.
+     * Send T-30/T-7/T-1 grace warnings to affiliates (or brands, for brand-side
+     * failure codes) who haven't unblocked the payout. Publishes through the
+     * unified NotificationPublisher pipeline (in-app row + transactional email).
      *
-     * Anchors on grace_started_at (stamped once on the first markPendingFunding call)
-     * rather than void_at (which resets every retry for retry-safety). #STRIPE-4 fix:
-     * keying off void_at meant warning windows never matched while retries were active,
-     * so an affiliate could go 50+ days without a single warning.
-     *
-     * Math: with grace_period_days = 60 and N days remaining (N ∈ {30, 7, 1}),
-     * the warning fires when grace_started_at = now() - (60 - N) days. Tags are
-     * written to grace_notifications_sent JSONB to prevent duplicate sends.
+     * Anchors on void_at (within a 24h window for the cron's daily cadence).
+     * The grace_notifications_sent JSONB array gates per-tier so retries within
+     * the same day are no-ops; the publisher's dedupe_key (payout_warning.{id}.t-{N})
+     * is belt-and-braces for cross-process races.
      */
-    private function fireGraceWarnings(): void
+    private function fireGraceWarnings(NotificationPublisher $publisher): void
     {
-        // Falls back to legacy 'grace_period_days' for back-compat during the config split rollout.
-        $gracePeriodDays = (int) config(
-            'partna.store.payout_grace_period_days',
-            (int) config('partna.store.grace_period_days', 60),
-        );
-
         // Brand-side failure codes mean the affiliate cannot fix the issue —
         // route those warnings to the brand instead. The pre-existing query
         // already excludes payouts where the affiliate IS active, which
@@ -108,14 +99,24 @@ class VoidExpiredPayoutsJob implements ShouldQueue
                 ->filter(fn ($p) => ! in_array($tag, $p->grace_notifications_sent ?? [], true));
 
             foreach ($candidates as $payout) {
-                if (in_array($payout->failure_code, $brandSideCodes, true)) {
-                    $payout->brandProfessional?->notify(
-                        new BrandPayoutFundingGraceWarningNotification($payout, $daysOut)
-                    );
-                } else {
-                    $payout->affiliateProfessional?->notify(
-                        new AffiliatePayoutGraceWarningNotification($payout, $daysOut)
-                    );
+                $isBrandSide = in_array($payout->failure_code, $brandSideCodes, true);
+
+                try {
+                    if ($isBrandSide) {
+                        $this->publishBrandWarning($publisher, $payout, $daysOut);
+                    } else {
+                        $this->publishAffiliateWarning($publisher, $payout, $daysOut);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Payout grace warning publish failed', [
+                        'payout_id' => $payout->id,
+                        'days_out' => $daysOut,
+                        'brand_side' => $isBrandSide,
+                        'message' => $e->getMessage(),
+                    ]);
+
+                    // Skip the per-tier gate update so the next cron run retries.
+                    continue;
                 }
 
                 $sent = $payout->grace_notifications_sent ?? [];
@@ -123,6 +124,89 @@ class VoidExpiredPayoutsJob implements ShouldQueue
                 $payout->forceFill(['grace_notifications_sent' => array_values(array_unique($sent))])->save();
             }
         }
+    }
+
+    private function publishAffiliateWarning(NotificationPublisher $publisher, CommissionPayout $payout, int $daysOut): void
+    {
+        $affiliateId = $payout->affiliate_professional_id;
+        if (! $affiliateId) {
+            return;
+        }
+
+        $brand = $payout->brandProfessional?->display_name ?? 'a brand';
+        $amount = '$'.number_format($payout->gross_commission_cents / 100, 2);
+
+        // Mirrors the legacy MailMessage tiered copy: T-30 informational,
+        // T-7 urgent, T-1 final/critical.
+        [$title, $body] = match (true) {
+            $daysOut >= 30 => [
+                "Your {$amount} from {$brand} expires in 30 days",
+                "You have {$amount} in commission from {$brand} ready to be paid. To receive it, connect a Stripe account. After 60 days unconnected, the commission expires and the brand keeps the funds.",
+            ],
+            $daysOut >= 7 => [
+                "Only {$daysOut} days left to claim your {$amount} from {$brand}",
+                "Your {$amount} commission from {$brand} expires in {$daysOut} days. Connect Stripe now and we'll send the funds within 24h.",
+            ],
+            default => [
+                "Final notice: {$amount} from {$brand} expires tomorrow",
+                "This is your final reminder. Your {$amount} commission from {$brand} expires in 24 hours. If you don't connect Stripe before then, the commission is forfeited.",
+            ],
+        };
+
+        $publisher->publish(
+            professionalId: (string) $affiliateId,
+            frontendType: $daysOut <= 1 ? 'Critical' : 'Warning',
+            category: 'payout_warnings',
+            title: $title,
+            body: $body,
+            dedupeKey: "payout_warning.{$payout->id}.t-{$daysOut}",
+            ctaUrl: '/affiliate/stripe/connect',
+            primaryActionLabel: $daysOut <= 1 ? 'Connect Stripe — final reminder' : ($daysOut >= 30 ? 'Connect Stripe (5 min)' : 'Connect Stripe'),
+            retentionConfigKey: 'payout_warning',
+        );
+    }
+
+    private function publishBrandWarning(NotificationPublisher $publisher, CommissionPayout $payout, int $daysOut): void
+    {
+        $brandId = $payout->brand_professional_id;
+        if (! $brandId) {
+            return;
+        }
+
+        $affiliate = $payout->affiliateProfessional?->display_name ?? 'an affiliate';
+        $amount = '$'.number_format($payout->gross_commission_cents / 100, 2);
+
+        $reasonLine = match ($payout->failure_code) {
+            'wallet_currency_mismatch' => 'Your wallet balance is in a different currency than this payout requires — please contact support to resolve.',
+            default => 'Add a payment method in your Stripe settings so we can collect the commission and pay your affiliate.',
+        };
+
+        [$title, $body] = match (true) {
+            $daysOut >= 30 => [
+                "Commission payout of {$amount} to {$affiliate} blocked",
+                "A commission payout of {$amount} to {$affiliate} is blocked and will expire in 30 days. {$reasonLine}",
+            ],
+            $daysOut >= 7 => [
+                "{$daysOut} days to fix payment — {$amount} to {$affiliate}",
+                "Your commission payout of {$amount} to {$affiliate} expires in {$daysOut} days. {$reasonLine}",
+            ],
+            default => [
+                "Final notice: {$amount} payout to {$affiliate} expires tomorrow",
+                "This is your final reminder. A commission payout of {$amount} to {$affiliate} expires in 24 hours and the affiliate will not be paid. {$reasonLine}",
+            ],
+        };
+
+        $publisher->publish(
+            professionalId: (string) $brandId,
+            frontendType: $daysOut <= 1 ? 'Critical' : 'Warning',
+            category: 'payout_warnings',
+            title: $title,
+            body: $body,
+            dedupeKey: "payout_warning.{$payout->id}.t-{$daysOut}",
+            ctaUrl: '/account/settings?section=stripe',
+            primaryActionLabel: $daysOut <= 1 ? 'Fix payment settings — final reminder' : 'Fix payment settings',
+            retentionConfigKey: 'payout_warning',
+        );
     }
 
     public function failed(\Throwable $e): void
