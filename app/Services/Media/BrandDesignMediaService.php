@@ -136,6 +136,11 @@ class BrandDesignMediaService
             // the transaction so the count-then-insert cannot race past
             // PLACEHOLDER_MAX. Matches the locking pattern already in
             // deletePlaceholder/reorderPlaceholders below.
+            // Lock the rows and count them in PHP. PostgreSQL rejects
+            // `SELECT count(*) ... FOR UPDATE` (aggregate + row-level lock
+            // is not supported, SQLSTATE 0A000); SQLite accepted it which
+            // is why this slipped past the test suite. Pluck on the locked
+            // rows is the canonical Laravel-on-Postgres workaround.
             $activeCount = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->where('pool', SiteMedia::POOL_DESIGN)
@@ -144,6 +149,7 @@ class BrandDesignMediaService
                 ->where('is_active', true)
                 ->whereNotIn('processing_state', [SiteMedia::PROCESSING_STATE_FAILED])
                 ->lockForUpdate()
+                ->pluck('id')
                 ->count();
 
             if ($activeCount >= self::PLACEHOLDER_MAX) {
