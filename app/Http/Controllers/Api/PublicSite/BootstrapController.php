@@ -142,15 +142,28 @@ class BootstrapController extends ApiController
                     }
                 }
 
+                // Brand-attach branches: a connect attempt that hits the
+                // single-brand cap (RuntimeException from the link service)
+                // must NOT roll back the entire bootstrap. The affiliate's
+                // existing brand connection is preserved; the new attempt is
+                // skipped and surfaced in logs so the frontend can ask the
+                // user to disconnect first if they want to switch.
                 if (is_string($data['invite_token'] ?? null) && trim((string) $data['invite_token']) !== '') {
                     $invite = $brandAffiliateInviteService->findByToken((string) $data['invite_token']);
                     if (! $invite) {
                         throw new RuntimeException('Invite not found.');
                     }
 
-                    $brandAffiliateInviteService->claimInvite($invite, $professional);
-                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
-                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                    try {
+                        $brandAffiliateInviteService->claimInvite($invite, $professional);
+                        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, (string) $professional->id);
+                        $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                    } catch (RuntimeException $e) {
+                        Log::warning('Bootstrap brand-attach via invite_token skipped', [
+                            'professional_id' => (string) $professional->id,
+                            'reason' => $e->getMessage(),
+                        ]);
+                    }
                 } elseif (is_string($data['brand_partner_professional_id'] ?? null) && trim((string) $data['brand_partner_professional_id']) !== '') {
                     $brandPartnerProfessional = Professional::query()
                         ->whereKey((string) $data['brand_partner_professional_id'])
@@ -164,12 +177,20 @@ class BootstrapController extends ApiController
                     $affiliateId = (string) $professional->id;
                     $brandId = (string) $brandPartnerProfessional->id;
 
-                    if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
-                        $brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
-                    }
+                    try {
+                        if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
+                            $brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
+                        }
 
-                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
-                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                        $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                        $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                    } catch (RuntimeException $e) {
+                        Log::warning('Bootstrap brand-attach via brand_partner_professional_id skipped', [
+                            'professional_id' => $affiliateId,
+                            'brand_professional_id' => $brandId,
+                            'reason' => $e->getMessage(),
+                        ]);
+                    }
                 } elseif (is_string($data['join_brand_handle'] ?? null) && trim((string) $data['join_brand_handle']) !== '') {
                     $joinBrand = Professional::query()
                         ->where('handle_lc', strtolower(trim((string) $data['join_brand_handle'])))
@@ -185,9 +206,17 @@ class BootstrapController extends ApiController
                             $brandId = (string) $joinBrand->id;
 
                             if (! $brandPartnerLinks->isConnected($affiliateId, $brandId)) {
-                                $brandAffiliateInviteService->claimOpenInvite($joinBrand, $professional);
-                                $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
-                                $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                                try {
+                                    $brandAffiliateInviteService->claimOpenInvite($joinBrand, $professional);
+                                    $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
+                                    $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
+                                } catch (RuntimeException $e) {
+                                    Log::warning('Bootstrap brand-attach via join_brand_handle skipped', [
+                                        'professional_id' => $affiliateId,
+                                        'brand_professional_id' => $brandId,
+                                        'reason' => $e->getMessage(),
+                                    ]);
+                                }
                             }
                         }
                     }

@@ -487,6 +487,94 @@ it('claimOpenInvite creates invite and partner link in one transaction', functio
         ->exists())->toBeTrue();
 });
 
+// --- Single-brand cap (pilot/V1): each affiliate may connect to at most one brand. ---
+
+it('rejects connect when affiliate already has a different brand partner', function () {
+    $brandA = createBrand('capbranda');
+    $brandB = createBrand('capbrandb');
+    $affiliate = createAffiliate('capaffiliate');
+
+    $links = new BrandPartnerLinkService;
+    $links->connectBrandToAffiliate($affiliate->id, $brandA->id);
+
+    expect(fn () => $links->connectBrandToAffiliate($affiliate->id, $brandB->id))
+        ->toThrow(RuntimeException::class, 'Disconnect from your current brand partner');
+
+    // Brand A connection is preserved
+    expect(BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
+        ->where('brand_professional_id', $brandA->id)
+        ->where('slot', 0)
+        ->exists())->toBeTrue();
+
+    // Brand B connection was never created
+    expect(BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
+        ->where('brand_professional_id', $brandB->id)
+        ->exists())->toBeFalse();
+});
+
+it('allows reconnecting to a new brand after disconnecting from the previous one', function () {
+    $brandA = createBrand('switchbranda');
+    $brandB = createBrand('switchbrandb');
+    $affiliate = createAffiliate('switchaffiliate');
+
+    $links = new BrandPartnerLinkService;
+    $links->connectBrandToAffiliate($affiliate->id, $brandA->id);
+    $links->disconnectBrandFromAffiliate($affiliate->id, $brandA->id);
+
+    $newLink = $links->connectBrandToAffiliate($affiliate->id, $brandB->id);
+
+    expect($newLink->slot)->toBe(0);
+    expect(BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
+        ->where('brand_professional_id', $brandB->id)
+        ->where('slot', 0)
+        ->exists())->toBeTrue();
+});
+
+it('keeps an email invite pending when the cap blocks acceptance', function () {
+    $existingBrand = createBrand('alreadybrand');
+    $invitingBrand = createBrand('invitingbrand');
+    $affiliate = createAffiliate('boundaffiliate');
+
+    // Affiliate is already connected to Brand A
+    $links = new BrandPartnerLinkService;
+    $links->connectBrandToAffiliate($affiliate->id, $existingBrand->id);
+
+    // Brand B has issued an email invite to that affiliate
+    $inviteId = (string) Str::uuid();
+    $token = Str::random(48);
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('brand.brand_affiliate_invites')->insert([
+        'id' => $inviteId,
+        'brand_professional_id' => $invitingBrand->id,
+        'token' => $token,
+        'status' => 'pending',
+        'invite_type' => 'personalised',
+        'email' => $affiliate->primary_email,
+        'email_lc' => strtolower((string) $affiliate->primary_email),
+        'expires_at' => now()->addDays(30)->toDateTimeString(),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $service = new BrandAffiliateInviteService(new BrandPartnerLinkService);
+    $invite = BrandAffiliateInvite::find($inviteId);
+
+    expect(fn () => $service->claimInvite($invite, $affiliate))
+        ->toThrow(RuntimeException::class, 'Disconnect from your current brand partner');
+
+    // Invite must remain pending so the affiliate can accept later after disconnecting
+    $reloaded = BrandAffiliateInvite::find($inviteId);
+    expect($reloaded->status)->toBe('pending');
+    expect($reloaded->claimed_professional_id)->toBeNull();
+    expect($reloaded->accepted_at)->toBeNull();
+
+    // Existing Brand A connection survives untouched
+    expect(BrandPartnerLink::where('affiliate_professional_id', $affiliate->id)
+        ->where('brand_professional_id', $existingBrand->id)
+        ->where('slot', 0)
+        ->exists())->toBeTrue();
+});
+
 it('claimOpenInvite throws when affiliate has no site', function () {
     $brand = createBrand('sitelessbrand');
 
