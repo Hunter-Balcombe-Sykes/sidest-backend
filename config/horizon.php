@@ -59,6 +59,7 @@ return [
         'redis:images' => 300,
         'redis:mail' => 120,
         'redis_gdpr:gdpr' => 600,
+        'redis_video:videos' => 300,
     ],
 
     'trim' => [
