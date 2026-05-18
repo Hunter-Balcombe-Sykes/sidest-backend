@@ -91,14 +91,24 @@ function actingAsProfessional(\App\Models\Core\Professional\Professional $profes
     // app()->resolving(Request::class, ...) doesn't help here: Laravel's HTTP
     // testing layer creates the Request via createFromBase, not via container
     // resolution, so resolving() callbacks never fire.
-    app()->bind(\App\Http\Middleware\Auth\VerifySupabaseJwt::class, function () use ($supabaseUid) {
-        return new class($supabaseUid)
+    // Default claims mirror a verified user. Tests that need to exercise the
+    // unverified path should bind their own stub before calling actingAsProfessional
+    // (or bypass it entirely and hit the real middleware).
+    $claims = [
+        'sub' => $supabaseUid,
+        'email' => $professional->primary_email,
+        'email_verified' => true,
+    ];
+
+    app()->bind(\App\Http\Middleware\Auth\VerifySupabaseJwt::class, function () use ($supabaseUid, $claims) {
+        return new class($supabaseUid, $claims)
         {
-            public function __construct(private readonly string $uid) {}
+            public function __construct(private readonly string $uid, private readonly array $claims) {}
 
             public function handle(\Illuminate\Http\Request $request, \Closure $next)
             {
                 $request->attributes->set('supabase_uid', $this->uid);
+                $request->attributes->set('supabase_claims', $this->claims);
 
                 return $next($request);
             }
