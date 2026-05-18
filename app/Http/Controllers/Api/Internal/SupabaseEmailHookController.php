@@ -40,6 +40,7 @@ class SupabaseEmailHookController extends ApiController
         $recipientEmail = is_string($user['email'] ?? null) ? $user['email'] : null;
         $actionType = is_string($emailData['email_action_type'] ?? null) ? $emailData['email_action_type'] : null;
         $tokenHash = is_string($emailData['token_hash'] ?? null) ? $emailData['token_hash'] : null;
+        $token = is_string($emailData['token'] ?? null) ? $emailData['token'] : null;
         $redirectTo = is_string($emailData['redirect_to'] ?? null) ? $emailData['redirect_to'] : null;
 
         if (! $recipientEmail || ! $actionType || ! $tokenHash) {
@@ -56,7 +57,7 @@ class SupabaseEmailHookController extends ApiController
         $displayName = $this->resolveDisplayName($user);
 
         try {
-            $mailable = $this->resolveMailable($actionType, $recipientEmail, $displayName, $verifyUrl);
+            $mailable = $this->resolveMailable($actionType, $recipientEmail, $displayName, $verifyUrl, $token);
             if ($mailable === null) {
                 // Unsupported action type — return success so Supabase doesn't retry
                 // (it'll fall back to its built-in template). Log so we know to add support.
@@ -124,11 +125,29 @@ class SupabaseEmailHookController extends ApiController
         string $recipientEmail,
         ?string $displayName,
         string $verifyUrl,
+        ?string $code,
     ): ?\App\Mail\BaseTransactionalMail {
+        // Email-confirmation actions (signup, email change) use the 6-digit
+        // OTP from email_data.token. The frontend's verify step prompts for
+        // exactly this code, so a click-link would only confuse — the email
+        // is always opened side-by-side with the form asking for the digits.
+        $isConfirmAction = in_array(
+            $actionType,
+            ['signup', 'email_change', 'email_change_current', 'email_change_new'],
+            true
+        );
+
+        if ($isConfirmAction) {
+            if ($code === null || $code === '') {
+                return null;
+            }
+
+            return new EmailConfirmMail($recipientEmail, $displayName, $code);
+        }
+
         return match ($actionType) {
             'recovery' => new PasswordResetMail($recipientEmail, $displayName, $verifyUrl),
             'magiclink' => new MagicLinkMail($recipientEmail, $displayName, $verifyUrl),
-            'signup', 'email_change', 'email_change_current', 'email_change_new' => new EmailConfirmMail($recipientEmail, $displayName, $verifyUrl),
             'invite' => new InviteMail($recipientEmail, $displayName, $verifyUrl),
             default => null,
         };
