@@ -4,6 +4,7 @@ use App\Http\Middleware\AddETagHeaders;
 use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
+use App\Http\Middleware\Auth\RequireAal2;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
 use App\Http\Middleware\Auth\RequireEmailVerified;
 use App\Http\Middleware\Auth\VerifyShopifySessionToken;
@@ -96,6 +97,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'brand-funding-gate' => BrandFundingGate::class,
             'brand.only' => \App\Http\Middleware\EnsureBrandAccount::class,
             'affiliate.only' => \App\Http\Middleware\EnsureAffiliateAccount::class,
+            'require.aal2' => RequireAal2::class,
         ]);
     })
 
