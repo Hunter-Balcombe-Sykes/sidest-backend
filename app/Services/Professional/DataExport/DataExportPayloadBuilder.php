@@ -202,7 +202,7 @@ class DataExportPayloadBuilder
         // Per-professional policy overrides only — global policies apply to
         // every user and are not personal data.
         $policies = DB::connection('pgsql')
-            ->table('core.notification_email_policies')
+            ->table('notifications.notification_email_policies')
             ->where('professional_id', $professionalId)
             ->get()
             ->map(fn ($r) => (array) $r)

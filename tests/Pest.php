@@ -1534,13 +1534,13 @@ function setupBroadcastEmailReceiptsTable(): void
 }
 
 /**
- * core.notification_email_policies — per-pro and global send-mode overrides.
+ * notifications.notification_email_policies — per-pro and global send-mode overrides.
  * Empty in most tests; default behaviour (no rows) resolves to enabled.
  */
 function setupNotificationEmailPoliciesTable(): void
 {
     attachTestSchemas();
-    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.notification_email_policies (
+    \Illuminate\Support\Facades\DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_policies (
         id TEXT PRIMARY KEY,
         professional_id TEXT NULL,
         category_key TEXT NULL,

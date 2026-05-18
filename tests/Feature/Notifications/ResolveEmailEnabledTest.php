@@ -33,7 +33,7 @@ beforeEach(function () {
         }
     }
 
-    $conn->statement('CREATE TABLE IF NOT EXISTS core.notification_email_policies (
+    $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_policies (
         id TEXT PRIMARY KEY,
         professional_id TEXT NULL,
         category_key TEXT NOT NULL,
@@ -68,7 +68,7 @@ beforeEach(function () {
 
 function insertPolicy(?string $proId, string $category, string $mode): void
 {
-    DB::table('core.notification_email_policies')->insert([
+    DB::table('notifications.notification_email_policies')->insert([
         'id' => (string) \Illuminate\Support\Str::uuid(),
         'professional_id' => $proId,
         'category_key' => $category,

@@ -15,7 +15,7 @@ class StaffNotificationEmailPolicyController extends ApiController
 {
     public function indexGlobal(): JsonResponse
     {
-        $policies = DB::table('core.notification_email_policies')
+        $policies = DB::table('notifications.notification_email_policies')
             ->whereNull('professional_id')
             ->get(['category_key', 'mode'])
             ->keyBy('category_key');
@@ -32,7 +32,7 @@ class StaffNotificationEmailPolicyController extends ApiController
     {
         foreach ($request->validated()['policies'] as $update) {
             DB::statement(
-                'INSERT INTO core.notification_email_policies (id, professional_id, category_key, mode, created_at, updated_at)
+                'INSERT INTO notifications.notification_email_policies (id, professional_id, category_key, mode, created_at, updated_at)
                  VALUES (?, NULL, ?, ?, NOW(), NOW())
                  ON CONFLICT (category_key) WHERE professional_id IS NULL
                  DO UPDATE SET mode = EXCLUDED.mode, updated_at = NOW()',
@@ -49,7 +49,7 @@ class StaffNotificationEmailPolicyController extends ApiController
 
     public function indexProfessional(Professional $professional): JsonResponse
     {
-        $policies = DB::table('core.notification_email_policies')
+        $policies = DB::table('notifications.notification_email_policies')
             ->where('professional_id', $professional->id)
             ->get(['category_key', 'mode'])
             ->keyBy('category_key');
@@ -66,13 +66,13 @@ class StaffNotificationEmailPolicyController extends ApiController
     {
         foreach ($request->validated()['policies'] as $update) {
             if ($update['mode'] === 'default') {
-                DB::table('core.notification_email_policies')
+                DB::table('notifications.notification_email_policies')
                     ->where('professional_id', $professional->id)
                     ->where('category_key', $update['category'])
                     ->delete();
             } else {
                 DB::statement(
-                    'INSERT INTO core.notification_email_policies (id, professional_id, category_key, mode, created_at, updated_at)
+                    'INSERT INTO notifications.notification_email_policies (id, professional_id, category_key, mode, created_at, updated_at)
                      VALUES (?, ?, ?, ?, NOW(), NOW())
                      ON CONFLICT (professional_id, category_key) WHERE professional_id IS NOT NULL
                      DO UPDATE SET mode = EXCLUDED.mode, updated_at = NOW()',

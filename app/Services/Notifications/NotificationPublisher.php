@@ -317,12 +317,12 @@ class NotificationPublisher
         $categories = self::categories();
         $mandatory = self::mandatoryCategories();
 
-        $perProPolicies = DB::table('core.notification_email_policies')
+        $perProPolicies = DB::table('notifications.notification_email_policies')
             ->where('professional_id', $professionalId)
             ->pluck('mode', 'category_key')
             ->all();
 
-        $globalPolicies = DB::table('core.notification_email_policies')
+        $globalPolicies = DB::table('notifications.notification_email_policies')
             ->whereNull('professional_id')
             ->pluck('mode', 'category_key')
             ->all();

@@ -27,7 +27,7 @@ beforeEach(function () {
         updated_at TEXT NULL
     )');
 
-    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS core.notification_email_policies (
+    DB::connection('pgsql')->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_policies (
         id TEXT PRIMARY KEY,
         professional_id TEXT NULL,
         category_key TEXT NULL,

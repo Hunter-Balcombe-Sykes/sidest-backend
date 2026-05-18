@@ -182,7 +182,7 @@ it('dispatches the mailable class resolved from config for the category', functi
         'CREATE TABLE IF NOT EXISTS core.professionals (id TEXT PRIMARY KEY, primary_email TEXT, deleted_at TEXT NULL)'
     );
     DB::connection('pgsql')->statement(
-        'CREATE TABLE IF NOT EXISTS core.notification_email_policies (id TEXT, professional_id TEXT, category_key TEXT, mode TEXT)'
+        'CREATE TABLE IF NOT EXISTS notifications.notification_email_policies (id TEXT, professional_id TEXT, category_key TEXT, mode TEXT)'
     );
     DB::connection('pgsql')->statement(
         'CREATE TABLE IF NOT EXISTS notifications.notification_email_preferences (id TEXT, professional_id TEXT, category_key TEXT, enabled INTEGER)'
