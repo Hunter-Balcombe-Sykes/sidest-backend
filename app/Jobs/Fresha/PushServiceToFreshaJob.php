@@ -29,10 +29,6 @@ class PushServiceToFreshaJob implements ShouldQueue
 
     public function handle(FreshaServiceSyncService $syncService): void
     {
-        if (! (bool) config('partna.features.fresha_sync', false)) {
-            return;
-        }
-
         $service = Service::query()
             ->withTrashed()
             ->where('id', $this->serviceId)

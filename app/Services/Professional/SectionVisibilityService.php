@@ -114,8 +114,6 @@ class SectionVisibilityService
         $needsBooking = in_array('booking', $presentTypes, true);
         $needsCredentials = in_array('credentials', $presentTypes, true);
         $needsExperience = in_array('experience', $presentTypes, true);
-        $smartBookingEnabled = (bool) config('partna.features.smart_booking', false);
-
         $subqueries = [];
 
         if ($needsGallery) {
@@ -446,19 +444,8 @@ class SectionVisibilityService
 
     private function professionalHasBookingIntegration(string $professionalId): bool
     {
-        // Smart-booking integration path is only available when the feature flag is on.
-        // Pre-launch, only the manual booking_url (redirect link) path is accepted.
-        if (! config('partna.features.smart_booking', false)) {
-            return false;
-        }
-
-        return ProfessionalIntegration::query()
-            ->where('professional_id', $professionalId)
-            ->whereIn('provider', [
-                ProfessionalIntegration::PROVIDER_SQUARE,
-                ProfessionalIntegration::PROVIDER_FRESHA,
-            ])
-            ->exists();
+        // Smart-booking (Square/Fresha integration) has been dropped — always false.
+        return false;
     }
 
     private function professionalHasBookingLinkBlock(string $professionalId): bool
