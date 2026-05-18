@@ -12,6 +12,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -50,6 +51,31 @@ class ProcessImageVariantsJob implements ShouldQueue
     }
 
     public function handle(ImageVariantService $service): void
+    {
+        // In-flight lock keyed on image_id (NOT job id) so a crash-then-retry
+        // can still re-acquire after the TTL elapses. The terminal-state guard
+        // below covers READY/FAILED but not PROCESSING — without this lock, a
+        // redelivered job mid-process would re-enter variant generation in
+        // parallel and race on Storage::put writes.
+        // TTL is timeout + 60s buffer so the lock auto-expires after a crash.
+        $lockKey = "image:processing-lock:{$this->imageId}";
+        $acquired = Redis::set($lockKey, '1', 'EX', $this->timeout + 60, 'NX');
+        if (! $acquired) {
+            Log::info('ProcessImageVariantsJob: another worker is processing this image, skipping.', [
+                'image_id' => $this->imageId,
+            ]);
+
+            return;
+        }
+
+        try {
+            $this->runHandle($service);
+        } finally {
+            Redis::del($lockKey);
+        }
+    }
+
+    private function runHandle(ImageVariantService $service): void
     {
         Log::info('ProcessImageVariantsJob: starting', [
             'image_id' => $this->imageId,

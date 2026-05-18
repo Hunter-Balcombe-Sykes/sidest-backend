@@ -38,9 +38,16 @@ class BrandDesignMediaService
         // finfo against actual bytes — getMimeType() trusts the client Content-Type header.
         $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()));
 
-        $media = $this->createDesignRow($site, $purpose, $file->getMimeType(), $file->getSize(), 0);
-
-        $basePath = "images/{$proId}/{$media->id}";
+        // Store the file BEFORE inserting the row so the row commits with
+        // `path` already populated. Eliminates the soft-delete-during-flight
+        // race where two concurrent uploads of the same variant would let
+        // Logo B's singleton-replace (inside createDesignRow) soft-delete
+        // Logo A's row before A's `$media->update(['path' => ...])` lands,
+        // silently no-opping the update and leaving the file orphaned.
+        // The deterministic content-hash basePath also dedupes identical
+        // bytes across re-uploads.
+        $contentHash = hash_file('sha256', $file->getRealPath());
+        $basePath = "images/{$proId}/by-hash/{$contentHash}";
 
         try {
             $originalPath = $this->images->storeOriginal($file, $basePath);
@@ -53,11 +60,18 @@ class BrandDesignMediaService
                 'purpose' => $purpose,
                 'error' => $e->getMessage(),
             ]);
-            $media->delete();
             throw $e;
         }
 
-        $media->update(['path' => $originalPath]);
+        $media = $this->createDesignRow(
+            $site,
+            $purpose,
+            $file->getMimeType(),
+            $file->getSize(),
+            0,
+            $originalPath,
+        );
+
         $this->dispatchVariantJob($media->id, $originalPath, $basePath, (string) $site->id);
         $this->invalidateSiteCache($site);
 
@@ -75,11 +89,12 @@ class BrandDesignMediaService
         // finfo against actual bytes — $mime comes from Shopify CDN headers, not verified.
         $this->assertMimeAllowed((new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes));
 
-        $media = $this->createDesignRow($site, $purpose, $mime, strlen($bytes), 0);
-
-        $basePath = "images/{$proId}/{$media->id}";
+        // Store the file BEFORE inserting the row — see upsertLogoFromUploadedFile
+        // for the race rationale. Content-hash basePath gives deterministic dedupe.
+        $contentHash = hash('sha256', $bytes);
+        $basePath = "images/{$proId}/by-hash/{$contentHash}";
         $ext = $this->extensionFromMime($mime);
-        $hash = substr(hash('sha256', $bytes), 0, 16);
+        $hash = substr($contentHash, 0, 16);
         $originalPath = "{$basePath}/original_{$hash}.{$ext}";
 
         try {
@@ -93,11 +108,11 @@ class BrandDesignMediaService
                 'purpose' => $purpose,
                 'error' => $e->getMessage(),
             ]);
-            $media->delete();
             throw $e;
         }
 
-        $media->update(['path' => $originalPath]);
+        $media = $this->createDesignRow($site, $purpose, $mime, strlen($bytes), 0, $originalPath);
+
         $this->dispatchVariantJob($media->id, $originalPath, $basePath, (string) $site->id);
         $this->invalidateSiteCache($site);
 
@@ -117,6 +132,10 @@ class BrandDesignMediaService
             // filters identically). Rows stuck in 'failed' or with is_active=false
             // must not consume quota — they are invisible to the brand dashboard
             // and there is no affordance to clear them from there.
+            // lockForUpdate serializes concurrent addPlaceholder calls inside
+            // the transaction so the count-then-insert cannot race past
+            // PLACEHOLDER_MAX. Matches the locking pattern already in
+            // deletePlaceholder/reorderPlaceholders below.
             $activeCount = SiteMedia::query()
                 ->where('site_id', $site->id)
                 ->where('pool', SiteMedia::POOL_DESIGN)
@@ -124,6 +143,7 @@ class BrandDesignMediaService
                 ->whereNull('deleted_at')
                 ->where('is_active', true)
                 ->whereNotIn('processing_state', [SiteMedia::PROCESSING_STATE_FAILED])
+                ->lockForUpdate()
                 ->count();
 
             if ($activeCount >= self::PLACEHOLDER_MAX) {
@@ -419,9 +439,15 @@ class BrandDesignMediaService
         };
     }
 
-    private function createDesignRow(Site $site, string $purpose, ?string $mime, ?int $size, int $sortOrder): SiteMedia
-    {
-        return DB::transaction(function () use ($site, $purpose, $mime, $size, $sortOrder) {
+    private function createDesignRow(
+        Site $site,
+        string $purpose,
+        ?string $mime,
+        ?int $size,
+        int $sortOrder,
+        ?string $path = null,
+    ): SiteMedia {
+        return DB::transaction(function () use ($site, $purpose, $mime, $size, $sortOrder, $path) {
             // Singleton-replace: soft-delete any prior active row with this purpose.
             SiteMedia::query()
                 ->where('site_id', $site->id)
@@ -432,11 +458,15 @@ class BrandDesignMediaService
                 ->get()
                 ->each(fn (SiteMedia $row) => $row->delete());
 
+            // Logo callers pass $path so the row commits with it already set
+            // (the file was stored before this call to avoid the soft-delete-
+            // during-flight race). Callers that legitimately need an empty
+            // path can omit it.
             return SiteMedia::create([
                 'site_id' => $site->id,
                 'pool' => SiteMedia::POOL_DESIGN,
                 'purpose' => $purpose,
-                'path' => '',
+                'path' => $path ?? '',
                 'sort_order' => $sortOrder,
                 'is_active' => true,
                 'media_type' => SiteMedia::MEDIA_TYPE_IMAGE,

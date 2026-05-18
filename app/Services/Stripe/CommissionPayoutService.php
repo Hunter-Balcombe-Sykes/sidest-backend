@@ -10,6 +10,7 @@ use App\Models\Commerce\Order;
 use App\Models\Core\Professional\Professional;
 use App\Services\Cache\AnalyticsCacheService;
 use App\Services\Notifications\NotificationPublisher;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiConnectionException;
@@ -200,8 +201,37 @@ class CommissionPayoutService
     /**
      * Create a payout batch record and link all eligible orders inside a lockForUpdate
      * transaction so a concurrent sweep cannot double-claim the same orders.
+     *
+     * The forceCreate is additionally protected by the `commission_payouts_natural_key_uq`
+     * partial UNIQUE index (brand_professional_id, affiliate_professional_id, eligible_after)
+     * — if a concurrent path bypasses the row lock and inserts first, the second writer
+     * loses with a UniqueConstraintViolationException and we treat the conflict as
+     * "another worker created this batch" by returning null.
      */
     private function createPayoutBatch(
+        string $brandId,
+        string $affiliateId,
+        string $currency,
+        \DateTimeInterface $cutoff,
+    ): ?CommissionPayout {
+        try {
+            return $this->createPayoutBatchTransactional($brandId, $affiliateId, $currency, $cutoff);
+        } catch (UniqueConstraintViolationException $e) {
+            // Partial-unique conflict on (brand_professional_id, affiliate_professional_id,
+            // eligible_after) for a non-terminal payout — another sweep beat us to it.
+            // The transaction has already rolled back, so no orders were linked.
+            Log::warning('Commission payout batch lost natural-key race; treating as created by concurrent worker', [
+                'brand_id' => $brandId,
+                'affiliate_id' => $affiliateId,
+                'currency' => $currency,
+                'cutoff' => $cutoff->format(\DateTimeInterface::ATOM),
+            ]);
+
+            return null;
+        }
+    }
+
+    private function createPayoutBatchTransactional(
         string $brandId,
         string $affiliateId,
         string $currency,

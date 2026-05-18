@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -53,6 +54,30 @@ class ProcessVideoVariantsJob implements ShouldQueue
     }
 
     public function handle(VideoVariantService $service): void
+    {
+        // In-flight lock keyed on media_id (NOT job id) so a crash-then-retry
+        // can still re-acquire after the TTL elapses. The terminal-state guard
+        // below covers READY/FAILED but not PROCESSING — without this lock, a
+        // redelivered job mid-encode would re-enter FFmpeg work in parallel.
+        // TTL is timeout + 60s buffer so the lock auto-expires after a crash.
+        $lockKey = "video:processing-lock:{$this->mediaId}";
+        $acquired = Redis::set($lockKey, '1', 'EX', $this->timeout + 60, 'NX');
+        if (! $acquired) {
+            Log::info('ProcessVideoVariantsJob: another worker is processing this media, skipping.', [
+                'media_id' => $this->mediaId,
+            ]);
+
+            return;
+        }
+
+        try {
+            $this->runHandle($service);
+        } finally {
+            Redis::del($lockKey);
+        }
+    }
+
+    private function runHandle(VideoVariantService $service): void
     {
         Log::info('ProcessVideoVariantsJob: starting', [
             'media_id' => $this->mediaId,
