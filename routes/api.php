@@ -109,6 +109,36 @@ Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::cla
 
 Route::get('/health', fn () => response()->json(['ok' => true]))->middleware('throttle:health-check');
 
+// TEMP: verify ffmpeg/ffprobe are present on Laravel Cloud after nixpacks.toml change.
+// Non-production only — returns 404 on prod. Remove once verified.
+Route::get('/health/ffmpeg', function () {
+    if (app()->environment('production')) {
+        abort(404);
+    }
+
+    $probe = function (string $bin): array {
+        $which = new \Symfony\Component\Process\Process(['/usr/bin/env', 'which', $bin]);
+        $which->run();
+        $path = trim($which->getOutput());
+
+        if ($path === '') {
+            return ['found' => false, 'path' => null, 'version' => null];
+        }
+
+        $ver = new \Symfony\Component\Process\Process([$path, '-version']);
+        $ver->run();
+        $firstLine = strtok($ver->getOutput(), "\n") ?: null;
+
+        return ['found' => true, 'path' => $path, 'version' => $firstLine];
+    };
+
+    return response()->json([
+        'env' => app()->environment(),
+        'ffmpeg' => $probe('ffmpeg'),
+        'ffprobe' => $probe('ffprobe'),
+    ]);
+})->middleware('throttle:health-check');
+
 // Header-based fallback for path-based frontend routing (e.g. /shloom).
 // When the frontend cannot use subdomain DNS, it sends the subdomain
 // via the X-Site-Subdomain header through the Next.js proxy.
