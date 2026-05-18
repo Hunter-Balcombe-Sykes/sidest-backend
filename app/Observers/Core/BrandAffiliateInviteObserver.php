@@ -2,10 +2,12 @@
 
 namespace App\Observers\Core;
 
+use App\Mail\Affiliate\AffiliateInvitedMail;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Observers\Concerns\LogsWithRequestContext;
 use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 // V2: Publishes invite notifications — "invited" to affiliate, "accepted"/"declined" to brand.
 class BrandAffiliateInviteObserver
@@ -22,23 +24,49 @@ class BrandAffiliateInviteObserver
     public function created(BrandAffiliateInvite $invite): void
     {
         try {
+            $brandName = $this->brandName($invite->brand_professional_id);
             $claimedId = trim((string) ($invite->claimed_professional_id ?? ''));
-            if ($claimedId === '') {
+
+            if ($claimedId !== '') {
+                // The invitee already has a Partna account — in-app notification covers it.
+                $this->publisher->publish(
+                    professionalId: $claimedId,
+                    frontendType: 'Invitation',
+                    category: 'invites',
+                    title: 'You have been invited',
+                    body: "{$brandName} has invited you to join their affiliate program.",
+                    dedupeKey: "invite.received.{$invite->id}",
+                    ctaUrl: '/account/affiliates',
+                    retentionConfigKey: 'invite',
+                );
+
                 return;
             }
 
-            $brandName = $this->brandName($invite->brand_professional_id);
+            // Targeted invite (has a recipient email) but no Partna account yet — send the
+            // signup-prompt email so the brand doesn't have to share the link manually.
+            $recipientEmail = trim((string) ($invite->email ?? ''));
+            $token = trim((string) ($invite->token ?? ''));
+            if ($recipientEmail === '' || $token === '') {
+                // Generic open invite link (no email on the row) — nothing to send.
+                return;
+            }
 
-            $this->publisher->publish(
-                professionalId: $claimedId,
-                frontendType: 'Invitation',
-                category: 'invites',
-                title: 'You have been invited',
-                body: "{$brandName} has invited you to join their affiliate program.",
-                dedupeKey: "invite.received.{$invite->id}",
-                ctaUrl: '/account/affiliates',
-                retentionConfigKey: 'invite',
-            );
+            $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+            $acceptUrl = $frontendUrl.'/account/sign-up?invite='.rawurlencode($token);
+            $expiresInDays = $invite->expires_at !== null
+                ? max(0, (int) now()->diffInDays($invite->expires_at, false))
+                : null;
+
+            Mail::send(new AffiliateInvitedMail(
+                recipientEmail: $recipientEmail,
+                recipientFirstName: is_string($invite->first_name ?? null) && trim((string) $invite->first_name) !== ''
+                    ? trim((string) $invite->first_name)
+                    : null,
+                brandName: $brandName,
+                acceptUrl: $acceptUrl,
+                expiresInDays: $expiresInDays,
+            ));
         } catch (\Throwable $e) {
             Log::warning('BrandAffiliateInvite created notification failed', $this->logContext(__METHOD__, [
                 'invite_id' => $invite->id,
