@@ -352,6 +352,15 @@ class BrandAffiliateInviteController extends ApiController
             return $this->error('Invite not found.', 404);
         }
 
+        // Accepted invites are the audit record of how an affiliate joined this brand.
+        // Hard-deleting them would shred that paper trail (no SoftDeletes on this model).
+        if ($invite->status === 'accepted') {
+            return $this->error(
+                'Accepted invites cannot be deleted — they are part of the connection audit trail.',
+                422
+            );
+        }
+
         $invite->delete();
 
         return $this->success([

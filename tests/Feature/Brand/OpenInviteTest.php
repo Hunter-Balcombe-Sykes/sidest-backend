@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Professional\Affiliate\OpenInviteController;
+use App\Http\Controllers\Api\Professional\Brand\BrandAffiliateInviteController;
 use App\Http\Controllers\Api\PublicSite\PublicOpenInviteController;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
@@ -712,4 +713,61 @@ it('claimOpenInvite throws when affiliate has no site', function () {
 
     expect(fn () => $service->claimOpenInvite($brand, $affiliate))
         ->toThrow(RuntimeException::class, 'Your site could not be found');
+});
+
+it('rejects deletion of an accepted invite to preserve the connection audit trail', function () {
+    $brand = createBrand('auditbrand');
+    $affiliate = createAffiliate('auditedaffiliate');
+
+    $inviteId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('brand.brand_affiliate_invites')->insert([
+        'id' => $inviteId,
+        'brand_professional_id' => $brand->id,
+        'token' => Str::random(48),
+        'status' => 'accepted',
+        'invite_type' => 'personalised',
+        'email' => $affiliate->primary_email,
+        'email_lc' => strtolower((string) $affiliate->primary_email),
+        'claimed_professional_id' => $affiliate->id,
+        'accepted_at' => $now,
+        'expires_at' => now()->addDays(30)->toDateTimeString(),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $request = Request::create('/api/test', 'DELETE');
+    $request->attributes->set('professional', Professional::find($brand->id));
+
+    $response = (new BrandAffiliateInviteController)->destroy($request, $inviteId);
+
+    expect($response->status())->toBe(422);
+    expect(BrandAffiliateInvite::find($inviteId))->not->toBeNull();
+});
+
+it('allows deletion of a pending invite', function () {
+    $brand = createBrand('cleanupbrand');
+
+    $inviteId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('brand.brand_affiliate_invites')->insert([
+        'id' => $inviteId,
+        'brand_professional_id' => $brand->id,
+        'token' => Str::random(48),
+        'status' => 'pending',
+        'invite_type' => 'personalised',
+        'email' => 'pending@example.com',
+        'email_lc' => 'pending@example.com',
+        'expires_at' => now()->addDays(30)->toDateTimeString(),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $request = Request::create('/api/test', 'DELETE');
+    $request->attributes->set('professional', Professional::find($brand->id));
+
+    $response = (new BrandAffiliateInviteController)->destroy($request, $inviteId);
+
+    expect($response->status())->toBe(200);
+    expect(BrandAffiliateInvite::find($inviteId))->toBeNull();
 });
