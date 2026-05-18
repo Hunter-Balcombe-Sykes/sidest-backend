@@ -206,7 +206,11 @@ class FeatureFlagService
     /**
      * Flush the registry cache key. Per-pro/brand override keys (ff:pro:{id}, ff:brand:{id})
      * are NOT flushed here — call forgetPro/forgetBrand to invalidate individual scopes.
-     * SWR stale copies persist up to ~50 min; natural expiry is the only guarantee.
+     *
+     * SWR stale copies persist up to ~72 min worst case; natural expiry is the only guarantee.
+     * Worst case math: base TTL 300s + ±60s service jitter = max 360s, then
+     * CacheLockService::writeWithJitter applies ±20% to (input × STALE_TTL_MULTIPLIER=10),
+     * so the stale key's TTL caps at round(360 × 10 × 1.2) = 4320s ≈ 72 min.
      */
     public function flush(): void
     {
@@ -439,6 +443,14 @@ class FeatureFlagService
                     ->from('core.professionals')
                     ->whereColumn('core.professionals.id', 'core.feature_flag_overrides.professional_id')
                     ->whereNull('core.professionals.deleted_at'));
+
+                // Exclude overrides whose flag has been soft-deleted — mirrors
+                // loadProOverrides so the degraded path doesn't silently re-enable
+                // rolled-back flags during a Redis outage.
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('core.feature_flags')
+                    ->whereColumn('core.feature_flags.key', 'core.feature_flag_overrides.flag_key')
+                    ->whereNull('core.feature_flags.deleted_at'));
             }
 
             $proOverrides = $query->get()
@@ -457,6 +469,14 @@ class FeatureFlagService
                     ->from('brand.brand_profiles')
                     ->whereColumn('brand.brand_profiles.id', 'core.feature_flag_overrides.brand_id')
                     ->whereNull('brand.brand_profiles.deleted_at'));
+
+                // Exclude overrides whose flag has been soft-deleted — mirrors
+                // loadBrandOverrides; the cached path filters them and the
+                // degraded path must agree.
+                $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                    ->from('core.feature_flags')
+                    ->whereColumn('core.feature_flags.key', 'core.feature_flag_overrides.flag_key')
+                    ->whereNull('core.feature_flags.deleted_at'));
             }
 
             $brandOverrides = $query->get()
