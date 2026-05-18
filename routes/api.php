@@ -132,8 +132,13 @@ Route::get('/health/ffmpeg', function () {
         return ['found' => true, 'path' => $path, 'version' => $firstLine];
     };
 
+    $candidates = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/app/bin/ffmpeg'];
+    $existing = array_values(array_filter($candidates, 'file_exists'));
+
     return response()->json([
         'env' => app()->environment(),
+        'path_env' => getenv('PATH'),
+        'candidate_paths_found' => $existing,
         'ffmpeg' => $probe('ffmpeg'),
         'ffprobe' => $probe('ffprobe'),
     ]);
