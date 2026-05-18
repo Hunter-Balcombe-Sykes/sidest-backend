@@ -6,7 +6,9 @@ use App\Http\Controllers\Concerns\DetectsClientInfo;
 use App\Http\Requests\BaseFormRequest;
 use App\Http\Requests\Concerns\NormalizesProfessionalType;
 use App\Models\Core\Professional\Professional;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -32,6 +34,43 @@ class BootstrapRequest extends BaseFormRequest
             ? ['sometimes', 'required']
             : ['required'];
 
+        // Invite-only signup for affiliates: a NEW non-brand professional must
+        // arrive with one of invite_token / brand_partner_professional_id /
+        // join_brand_handle. Without it the bootstrap would happily create an
+        // orphaned affiliate with no brand link — no KV entry, no site.settings
+        // brand_partner — and the user lands on a 404'd subdomain (see hjjh).
+        // Brands self-onboard and never need an invite.
+        $isFirstTimeSignup = ! is_string($existingProfessionalId) || $existingProfessionalId === '';
+        $declaredType = mb_strtolower(trim((string) ($this->professional_type ?? '')));
+        $requiresInvite = $isFirstTimeSignup && $declaredType !== '' && $declaredType !== 'brand';
+
+        $inviteContextRule = $requiresInvite
+            ? [
+                'required_without_all:brand_partner_professional_id,join_brand_handle',
+                'nullable',
+                'string',
+                'max:80',
+            ]
+            : ['sometimes', 'nullable', 'string', 'max:80'];
+
+        $brandPartnerIdRule = $requiresInvite
+            ? [
+                'required_without_all:invite_token,join_brand_handle',
+                'nullable',
+                'uuid',
+                Rule::exists('professionals', 'id'),
+            ]
+            : ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')];
+
+        $joinBrandHandleRule = $requiresInvite
+            ? [
+                'required_without_all:invite_token,brand_partner_professional_id',
+                'nullable',
+                'string',
+                'max:50',
+            ]
+            : ['sometimes', 'nullable', 'string', 'max:50'];
+
         return [
             'handle' => ['sometimes', 'nullable', 'string', 'max:40'],
             'display_name' => ['required', 'string', 'max:80'],
@@ -49,9 +88,9 @@ class BootstrapRequest extends BaseFormRequest
             // where the frontend doesn't explicitly collect country.
             'country_code' => ['nullable', 'string', 'size:2', 'regex:/^[A-Z]{2}$/'],
             'timezone' => ['nullable', 'string', 'max:64'],
-            'invite_token' => ['sometimes', 'nullable', 'string', 'max:80'],
-            'brand_partner_professional_id' => ['sometimes', 'nullable', 'uuid', Rule::exists('professionals', 'id')],
-            'join_brand_handle' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'invite_token' => $inviteContextRule,
+            'brand_partner_professional_id' => $brandPartnerIdRule,
+            'join_brand_handle' => $joinBrandHandleRule,
             'shopify_setup_token' => ['sometimes', 'nullable', 'string', 'size:64', 'regex:/^[a-f0-9]{64}$/'],
             'professional_type' => [
                 ...$professionalTypeRules,
@@ -164,6 +203,45 @@ class BootstrapRequest extends BaseFormRequest
         }
 
         $this->merge($merge);
+    }
+
+    public function messages(): array
+    {
+        // All three rules trigger together for invite-only enforcement; collapse
+        // the three near-identical "required_without_all" messages into one
+        // user-facing string so the frontend gets a clean error to display.
+        $inviteRequiredMessage = 'You need an invitation from a brand to sign up as an affiliate. Ask the brand to send you an invite link.';
+
+        return [
+            'invite_token.required_without_all' => $inviteRequiredMessage,
+            'brand_partner_professional_id.required_without_all' => $inviteRequiredMessage,
+            'join_brand_handle.required_without_all' => $inviteRequiredMessage,
+        ];
+    }
+
+    // Surface invite-only signup rejections with a structured error code so the
+    // frontend can route the user back to "ask a brand to invite you" UI rather
+    // than showing a generic validation message buried in a toast.
+    protected function failedValidation(Validator $validator): void
+    {
+        $errors = $validator->errors();
+        $inviteFields = ['invite_token', 'brand_partner_professional_id', 'join_brand_handle'];
+
+        $inviteOnlyFailure = collect($inviteFields)
+            ->some(fn (string $f): bool => $errors->has($f)
+                && collect($errors->get($f))->contains(
+                    fn (string $msg): bool => str_starts_with($msg, 'You need an invitation')
+                ));
+
+        if ($inviteOnlyFailure) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'You need an invitation from a brand to sign up as an affiliate. Ask the brand to send you an invite link.',
+                'error' => 'invite_required',
+                'errors' => $errors->toArray(),
+            ], 422));
+        }
+
+        parent::failedValidation($validator);
     }
 
     private function generateHandleFromDisplayName(string $displayName): string

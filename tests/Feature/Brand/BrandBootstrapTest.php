@@ -256,6 +256,8 @@ it('returns 409 EMAIL_ALREADY_REGISTERED when a different auth user owns the ema
         'phone' => '0400000002',
         'first_name' => 'New',
         'professional_type' => 'professional',
+        // Satisfies the invite-only signup rule for non-brand types.
+        'join_brand_handle' => 'no-such-brand-for-test',
     ], uid: 'new-google-user-uid');
 
     expect($response->getStatusCode())->toBe(409);
@@ -275,6 +277,8 @@ it('does not create a BrandProfile for non-brand types', function () {
         'phone' => '0400000001',
         'first_name' => 'Test',
         'professional_type' => 'professional',
+        // Satisfies the invite-only signup rule for non-brand types.
+        'join_brand_handle' => 'no-such-brand-for-test',
     ], $uid);
 
     expect($response->getStatusCode())->toBe(200);
