@@ -38,11 +38,16 @@ class LoadCurrentProfessional
         $professional = $this->professionalCache->getByAuthId($uid);
 
         if (! $professional) {
-            // Important: /api/bootstrap should create this row
+            // Verified auth user with no Partna profile — they bailed mid-signup
+            // (closed the tab between supabase.auth.signUp and /api/bootstrap).
+            // Surface a structured error code so the frontend can route them
+            // back into the sign-up flow at the "about" step (resume=1) and
+            // finish the bootstrap with their existing session.
             Log::debug('LoadCurrentProfessional no professional for uid', ['uid' => $uid]);
 
             return response()->json([
-                'message' => 'professional profile missing. Call /api/bootstrap first.',
+                'error' => 'bootstrap_required',
+                'message' => 'Finish setting up your Partna account.',
             ], 403);
         }
 
