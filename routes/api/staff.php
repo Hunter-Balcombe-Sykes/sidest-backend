@@ -224,7 +224,6 @@ Route::prefix('staff')
 
 // Authorised Staff Admin Editing
 Route::prefix('staff')
-<<<<<<< HEAD
     ->middleware(['supabase.jwt', 'require.email_verified', 'staff', 'require.aal2', 'staff.admin', 'throttle:staff', 'staff.audit'])
     ->whereUuid('professional')
     ->scopeBindings()
