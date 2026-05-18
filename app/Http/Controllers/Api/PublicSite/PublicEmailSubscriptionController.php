@@ -104,7 +104,9 @@ class PublicEmailSubscriptionController extends ApiController
                 $overwriteName,
             );
         } catch (\Throwable $exception) {
-            // Do not block successful subscription if customer sync fails.
+            // Do not block successful subscription if customer sync fails — but DO
+            // surface to Nightwatch so silent customer/list drift isn't invisible.
+            report($exception);
             Log::warning('Public subscribe customer upsert failed', [
                 'professional_id' => (string) $site->professional_id,
                 'email' => $email,

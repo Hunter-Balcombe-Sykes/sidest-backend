@@ -4,7 +4,7 @@ namespace App\Services\Customers;
 
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Customer;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -111,11 +111,7 @@ class ContactCaptureService
             // it after construction rather than via mass-assignment.
             try {
                 return $this->createCustomerRow($professionalId, $fullName, $email, $phone, $source, $externalId, $marketingOptIn);
-            } catch (QueryException $e) {
-                if ($e->getCode() !== '23505') {
-                    throw $e;
-                }
-
+            } catch (UniqueConstraintViolationException $e) {
                 // Phone collides with another contact on the same affiliate — retry without phone.
                 return $this->createCustomerRow($professionalId, $fullName, $email, null, $source, $externalId, $marketingOptIn);
             }
@@ -224,26 +220,17 @@ class ContactCaptureService
 
         try {
             $this->upsertMarketingSubscription($professionalId, $email, $fullName, $consent);
-        } catch (QueryException $e) {
-            // 23505 = another request beat us to the INSERT. Re-fetch and make
-            // sure the surviving row reflects the state we wanted (subscribed).
-            if ($e->getCode() === '23505') {
-                try {
-                    $this->reconcileRacedSubscription($professionalId, $email, $fullName, $consent);
-                } catch (Throwable $reconcileError) {
-                    Log::warning('Marketing subscription reconcile after race failed', [
-                        'professional_id' => $professionalId,
-                        'message' => $reconcileError->getMessage(),
-                    ]);
-                }
-
-                return;
+        } catch (UniqueConstraintViolationException $e) {
+            // Another request beat us to the INSERT. Re-fetch and make sure the
+            // surviving row reflects the state we wanted (subscribed).
+            try {
+                $this->reconcileRacedSubscription($professionalId, $email, $fullName, $consent);
+            } catch (Throwable $reconcileError) {
+                Log::warning('Marketing subscription reconcile after race failed', [
+                    'professional_id' => $professionalId,
+                    'message' => $reconcileError->getMessage(),
+                ]);
             }
-
-            Log::warning('Marketing subscription capture failed', [
-                'professional_id' => $professionalId,
-                'message' => $e->getMessage(),
-            ]);
         } catch (Throwable $e) {
             Log::warning('Marketing subscription capture failed', [
                 'professional_id' => $professionalId,
@@ -353,10 +340,7 @@ class ContactCaptureService
         try {
             $customer->phone = $phone;
             $customer->save();
-        } catch (QueryException $e) {
-            if ($e->getCode() !== '23505') {
-                throw $e;
-            }
+        } catch (UniqueConstraintViolationException $e) {
             $customer->phone = $customer->getOriginal('phone');
             $customer->save();
         }

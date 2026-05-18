@@ -32,7 +32,11 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
     public function __construct(
         public string $notificationId,
         public string $listKey = 'sidest_updates'
-    ) {}
+    ) {
+        // Coordinator job: long chunkById walk over EmailSubscription. Keep it off
+        // the default queue so a large broadcast doesn't back-pressure unrelated work.
+        $this->onQueue('notifications');
+    }
 
     public function handle(): void
     {

@@ -92,7 +92,7 @@ Three key verification wins from the migration files:
 
 ## P1 — Fix before pilot launch
 
-- [ ] **#LIFE-1** · P1 — `SendEnquiryNotificationJob` has a read-modify-write race on `email_sent_at` — duplicate emails on retry
+- [x] **#LIFE-1** · P1 — `SendEnquiryNotificationJob` has a read-modify-write race on `email_sent_at` — duplicate emails on retry
     - **Where:** app/Jobs/Notifications/SendEnquiryNotificationJob.php:38-50
     - **Affects:** Site enquiry email recipients — duplicate notification emails when the job retries or two Horizon workers pick up the same job concurrently.
     - **Effort:** S (~0.5–1h)
@@ -112,7 +112,7 @@ Three key verification wins from the migration files:
         $enquiry->forceFill(['email_sent_at' => now()])->saveQuietly();
         ```
 
-- [ ] **#LIFE-2** · P1 — `ContactCaptureService` catches generic `QueryException` instead of typed `UniqueConstraintViolationException` — misroutes unrelated failures
+- [x] **#LIFE-2** · P1 — `ContactCaptureService` catches generic `QueryException` instead of typed `UniqueConstraintViolationException` — misroutes unrelated failures
     - **Where:** app/Services/Customers/ContactCaptureService.php:144-150, 165-177, 226-234
     - **Affects:** Every Shopify order webhook, Square booking, and site lead that races on customer creation or marketing subscription upsert. The generic catch also intercepts deadlocks, serialization failures, and connection drops, silently swallowing them on the `!== '23505'` re-throw path.
     - **Effort:** S (~0.5–1h)
@@ -142,7 +142,7 @@ Three key verification wins from the migration files:
             $customer->phone = $customer->getOriginal('phone');
         ```
 
-- [ ] **#LIFE-4** · P1 — `PublicEmailSubscriptionController` swallows customer-upsert exception without `report()` — Nightwatch is blind to sync drift
+- [x] **#LIFE-4** · P1 — `PublicEmailSubscriptionController` swallows customer-upsert exception without `report()` — Nightwatch is blind to sync drift
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEmailSubscriptionController.php:104-113
     - **Affects:** Every newsletter signup where the follow-up customer upsert fails. The subscription row succeeds but the `core.customers` record is never created or updated — the lists drift silently with zero observability.
     - **Effort:** S (~0.5–1h)
@@ -163,7 +163,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#OBS-1** · P1 — `NotificationPublisher::publish()` discards notifications silently on three guard branches — no log, no Nightwatch trace
+- [x] **#OBS-1** · P1 — `NotificationPublisher::publish()` discards notifications silently on three guard branches — no log, no Nightwatch trace
     - **Where:** app/Services/Notifications/NotificationPublisher.php:89-105
     - **Affects:** Every caller of `publish()` — booking completions, brand status changes, invite expiries, weekly analytics, onboarding nudges. An empty `$professionalId`, `$title`, `$body`, or `$dedupeKey` from a caller bug produces a silently dropped notification.
     - **Effort:** S (~0.5–1h)
@@ -192,7 +192,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#OBS-2** · P1 — `NotificationPublisher::publishMany()` silently skips invalid items and silently short-circuits when all items are invalid
+- [x] **#OBS-2** · P1 — `NotificationPublisher::publishMany()` silently skips invalid items and silently short-circuits when all items are invalid
     - **Where:** app/Services/Notifications/NotificationPublisher.php:168-175 (foreach skip) and following empty-rows guard
     - **Affects:** Fan-out callers that use `publishMany()` for bulk notification delivery — brand-affiliate invite batches, staff broadcasts. A bug producing all-empty fields results in zero notifications with zero evidence.
     - **Effort:** S (~0.5–1h)
@@ -216,7 +216,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#JOB-1** · P1 — `SendTransactionalNotificationEmailJob` silently discards permanent failures — financial emails vanish without a Horizon failure record
+- [x] **#JOB-1** · P1 — `SendTransactionalNotificationEmailJob` silently discards permanent failures — financial emails vanish without a Horizon failure record
     - **Where:** app/Jobs/Notifications/SendTransactionalNotificationEmailJob.php:51-55, 79-82, 86-89
     - **Affects:** Transactional email delivery for invites, commissions, and payouts — failures on the "no email on record" and "mailable instantiation failed" paths increment no failed-jobs counter and fire no Nightwatch alert.
     - **Effort:** S (~0.5–1h)
@@ -245,7 +245,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SCALE-1** · P1 — `SendStaffBroadcastEmailsJob` runs on the `default` queue — its chunkById walk starves other default-queue work
+- [x] **#SCALE-1** · P1 — `SendStaffBroadcastEmailsJob` runs on the `default` queue — its chunkById walk starves other default-queue work
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailsJob.php:28-34 (constructor — no `onQueue` call)
     - **Affects:** Queue health under load — a staff broadcast to tens of thousands of subscribers occupies a `default` worker for up to 120s, back-pressuring every other unclassified job in the system.
     - **Effort:** S (~0.5–1h)

@@ -40,18 +40,35 @@ class NotificationPublisher
     ): void {
         $professionalId = trim($professionalId);
         if ($professionalId === '') {
+            Log::warning('NotificationPublisher: dropped notification — empty professional_id', [
+                'category' => $category,
+                'frontend_type' => $frontendType,
+            ]);
+
             return;
         }
 
         $title = trim($title);
         $body = trim($body);
         if ($title === '' || $body === '') {
+            Log::warning('NotificationPublisher: dropped notification — empty title/body', [
+                'category' => $category,
+                'professional_id' => $professionalId,
+                'empty_field' => $title === '' ? 'title' : 'body',
+            ]);
+
             return;
         }
 
         $dedupeKey = trim($dedupeKey);
         if ($dedupeKey === '') {
-            // Require a non-empty dedupe key — callers should always provide one.
+            // Empty dedupe key is always a caller bug — alert via Nightwatch.
+            report(new \UnexpectedValueException('NotificationPublisher: empty dedupeKey'));
+            Log::warning('NotificationPublisher: dropped notification — empty dedupe_key', [
+                'category' => $category,
+                'professional_id' => $professionalId,
+            ]);
+
             return;
         }
 
@@ -130,12 +147,25 @@ class NotificationPublisher
         $rows = [];
         $idToCategoryAndPro = [];
 
-        foreach ($items as $item) {
+        $skipped = 0;
+        foreach ($items as $index => $item) {
             $professionalId = trim((string) ($item['professionalId'] ?? ''));
             $title = trim((string) ($item['title'] ?? ''));
             $body = trim((string) ($item['body'] ?? ''));
             $dedupeKey = trim((string) ($item['dedupeKey'] ?? ''));
             if ($professionalId === '' || $title === '' || $body === '' || $dedupeKey === '') {
+                Log::warning('NotificationPublisher::publishMany — skipped invalid item', [
+                    'index' => $index,
+                    'category' => (string) ($item['category'] ?? ''),
+                    'missing' => array_keys(array_filter([
+                        'professionalId' => $professionalId === '',
+                        'title' => $title === '',
+                        'body' => $body === '',
+                        'dedupeKey' => $dedupeKey === '',
+                    ])),
+                ]);
+                $skipped++;
+
                 continue;
             }
 
@@ -169,6 +199,11 @@ class NotificationPublisher
         }
 
         if ($rows === []) {
+            Log::warning('NotificationPublisher::publishMany — all items invalid, nothing published', [
+                'input_count' => count($items),
+                'skipped' => $skipped,
+            ]);
+
             return;
         }
 

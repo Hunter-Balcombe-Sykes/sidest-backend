@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -32,9 +33,22 @@ class SendEnquiryNotificationJob implements ShouldQueue
 
     public function handle(): void
     {
-        $enquiry = Enquiry::query()->find($this->enquiryId);
+        // Lock the enquiry row so two concurrent workers (retry overlapping with the
+        // original, or Horizon scale-out) can't both see email_sent_at = null and
+        // both deliver the email. Mirrors SendTransactionalNotificationEmailJob.
+        $enquiry = DB::transaction(function () {
+            $e = Enquiry::query()->lockForUpdate()->find($this->enquiryId);
+            if ($e === null) {
+                return null;
+            }
+            if ($e->email_sent_at !== null) {
+                return false;
+            }
 
-        if (! $enquiry) {
+            return $e;
+        });
+
+        if ($enquiry === null) {
             Log::warning('SendEnquiryNotificationJob: enquiry not found', [
                 'enquiry_id' => $this->enquiryId,
             ]);
@@ -42,7 +56,7 @@ class SendEnquiryNotificationJob implements ShouldQueue
             return;
         }
 
-        if ($enquiry->email_sent_at !== null) {
+        if ($enquiry === false) {
             return; // already sent on a previous attempt
         }
 

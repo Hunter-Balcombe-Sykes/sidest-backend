@@ -85,19 +85,22 @@ class SendTransactionalNotificationEmailJob implements ShouldQueue
             ->value('primary_email');
 
         if (! $email) {
-            Log::warning('Notification email skipped: no email on record', [
-                'professional_id' => $this->professionalId,
-            ]);
+            // Non-transient: retrying 3× will never produce an email. Mark the
+            // job failed so Horizon's failed-jobs counter increments and
+            // Nightwatch alerts via failed() — critical for payout/commission categories.
+            $this->fail(new \RuntimeException(
+                'no primary_email on record for professional '.$this->professionalId
+            ));
 
             return;
         }
 
         $mailable = $this->buildMailable($notification, $class);
         if ($mailable === null) {
-            Log::warning('Notification email skipped: mailable instantiation failed', [
-                'category' => $this->category,
-                'class' => $class,
-            ]);
+            // Non-transient: the mailable class is misconfigured. Same reasoning as above.
+            $this->fail(new \RuntimeException(
+                'mailable instantiation failed for category '.$this->category.' (class '.$class.')'
+            ));
 
             return;
         }
