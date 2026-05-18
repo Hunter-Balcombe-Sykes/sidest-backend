@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 // V2: An uploaded image or video belonging to a site. Tracks processing state (pending/processing/ready/failed) and owns MediaVariant children.
+// POOL_* constants are enforced at the DB level. @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
 class SiteMedia extends BaseModel
 {
     use HasUuids, SoftDeletes;

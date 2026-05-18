@@ -17,6 +17,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 //   primary_email, name, phone are hidden so toArray() / toJson() / log dumps
 //   never broadcast staff identity. Any staff-facing endpoint that legitimately
 //   needs these fields must expose them via a dedicated StaffResource.
+//
+// ROLE_* constants are enforced at the DB level. @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
 class PartnaStaff extends BaseModel
 {
     use HasFactory, HasUuids;

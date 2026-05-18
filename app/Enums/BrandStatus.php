@@ -7,6 +7,9 @@ namespace App\Enums;
  *
  * Stages 1-5 are progressive — brands step through them in order.
  * disconnected and systems_down are out-of-band states.
+ *
+ * Values are enforced at the DB level on brand_status_history.from_status/to_status.
+ * @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
  */
 enum BrandStatus: string
 {

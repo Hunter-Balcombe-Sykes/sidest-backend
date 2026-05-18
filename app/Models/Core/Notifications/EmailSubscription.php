@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
 // V2: Marketing email opt-in/out record per professional+email. Source of truth for consent; caches status on Customer for performance.
+// status ('subscribed'/'unsubscribed') is enforced at the DB level. @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
 class EmailSubscription extends BaseModel
 {
     use HasUuids;

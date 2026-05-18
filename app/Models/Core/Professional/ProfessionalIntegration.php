@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Arr;
 
 // V2: OAuth integration record (Square, Fresha, Shopify). Stores encrypted tokens and provider_metadata (webhook IDs, collection handles, etc.).
+// PROVIDER_* constants are enforced at the DB level. @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
 class ProfessionalIntegration extends BaseModel
 {
     use HasUuids;

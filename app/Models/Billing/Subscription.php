@@ -7,6 +7,7 @@ use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 // V2: Stripe-backed subscription linking a professional to a plan. Tracks billing period, cancellation state, and raw provider payload.
+// STATUS_* constants are enforced at the DB level. @see supabase/migrations/202605190000002_add_enum_check_constraints.sql
 class Subscription extends BaseModel
 {
     protected $table = 'billing.subscriptions';
