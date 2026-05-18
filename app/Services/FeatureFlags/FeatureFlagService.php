@@ -102,6 +102,8 @@ class FeatureFlagService
     /**
      * Upsert a feature flag override for the given scope, then invalidate
      * the relevant cache key so the next read reflects the change.
+     *
+     * @return bool true if cache invalidation succeeded, false if it failed (DB write always succeeds)
      */
     public function setOverride(
         string $key,
@@ -110,7 +112,7 @@ class FeatureFlagService
         ?string $reason = null,
         ?Carbon $expiresAt = null,
         ?string $createdBy = null,
-    ): void {
+    ): bool {
         $attrs = [
             'flag_key' => $key,
             'enabled' => $enabled,
@@ -141,6 +143,8 @@ class FeatureFlagService
             } else {
                 $this->forgetPro($scope->professionalId);
             }
+
+            return true;
         } catch (Throwable $e) {
             Log::warning('feature_flags.invalidation_failed', [
                 'error' => $e->getMessage(),
@@ -148,14 +152,18 @@ class FeatureFlagService
                 'scope_brand_id' => $scope->brandId,
                 'scope_professional_id' => $scope->professionalId,
             ]);
+
+            return false;
         }
     }
 
     /**
      * Delete a feature flag override for the given scope, then invalidate
      * the relevant cache key.
+     *
+     * @return bool true if cache invalidation succeeded, false if it failed (DB delete always succeeds)
      */
-    public function clearOverride(string $key, OverrideScope $scope): void
+    public function clearOverride(string $key, OverrideScope $scope): bool
     {
         $query = FeatureFlagOverride::where('flag_key', $key);
 
@@ -173,6 +181,8 @@ class FeatureFlagService
             } else {
                 $this->forgetPro($scope->professionalId);
             }
+
+            return true;
         } catch (Throwable $e) {
             Log::warning('feature_flags.invalidation_failed', [
                 'error' => $e->getMessage(),
@@ -180,6 +190,8 @@ class FeatureFlagService
                 'scope_brand_id' => $scope->brandId,
                 'scope_professional_id' => $scope->professionalId,
             ]);
+
+            return false;
         }
     }
 
@@ -275,9 +287,17 @@ class FeatureFlagService
         return (bool) config('partna.features.'.$key, false);
     }
 
-    private function jitteredTtl(): int
+    private function jitteredTtl(?Carbon $nearestExpiry = null): int
     {
-        return self::BASE_TTL_SECONDS + random_int(-self::TTL_JITTER_SECONDS, self::TTL_JITTER_SECONDS);
+        $base = self::BASE_TTL_SECONDS + random_int(-self::TTL_JITTER_SECONDS, self::TTL_JITTER_SECONDS);
+
+        if ($nearestExpiry !== null) {
+            $secondsUntilExpiry = max(1, (int) $nearestExpiry->diffInSeconds(now(), false) * -1);
+
+            return min($base, $secondsUntilExpiry);
+        }
+
+        return $base;
     }
 
     /** Load all active FeatureFlag rows as a key-indexed map. */
@@ -308,9 +328,20 @@ class FeatureFlagService
      */
     private function loadProOverrides(string $proId): array
     {
+        // Determine nearest expiry before entering the lock so the TTL can be
+        // capped — prevents overrides from being served past their expires_at.
+        $nearestExpiry = FeatureFlagOverride::query()
+            ->where('professional_id', $proId)
+            ->whereNull('brand_id')
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '>', now())
+            ->min('expires_at');
+
+        $nearestExpiry = $nearestExpiry ? Carbon::parse($nearestExpiry) : null;
+
         return $this->cacheLock->rememberLocked(
             "ff:pro:{$proId}",
-            $this->jitteredTtl(),
+            $this->jitteredTtl($nearestExpiry),
             function () use ($proId): array {
                 $query = FeatureFlagOverride::query()
                     ->where('professional_id', $proId)
@@ -344,9 +375,17 @@ class FeatureFlagService
      */
     private function loadBrandOverrides(string $brandId): array
     {
+        $nearestExpiry = FeatureFlagOverride::query()
+            ->where('brand_id', $brandId)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '>', now())
+            ->min('expires_at');
+
+        $nearestExpiry = $nearestExpiry ? Carbon::parse($nearestExpiry) : null;
+
         return $this->cacheLock->rememberLocked(
             "ff:brand:{$brandId}",
-            $this->jitteredTtl(),
+            $this->jitteredTtl($nearestExpiry),
             function () use ($brandId): array {
                 $query = FeatureFlagOverride::query()
                     ->where('brand_id', $brandId)

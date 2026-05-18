@@ -12,6 +12,7 @@ use App\Services\FeatureFlags\OverrideScope;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Throwable;
 
 // Staff admin endpoints to set / clear per-professional or per-brand flag overrides.
 class StaffFeatureFlagOverrideController extends ApiController
@@ -42,7 +43,7 @@ class StaffFeatureFlagOverrideController extends ApiController
             ? OverrideScope::forBrand($data['brand_id'])
             : OverrideScope::forProfessional($data['professional_id']);
 
-        $this->service->setOverride(
+        $cacheInvalidated = $this->service->setOverride(
             $key,
             $scope,
             (bool) $data['enabled'],
@@ -57,7 +58,13 @@ class StaffFeatureFlagOverrideController extends ApiController
             ->when($scope->professionalId, fn ($q) => $q->where('professional_id', $scope->professionalId)->whereNull('brand_id'))
             ->first();
 
-        return (new FeatureFlagOverrideResource($created))->response()->setStatusCode(201);
+        $response = (new FeatureFlagOverrideResource($created))->response()->setStatusCode(201);
+
+        if (! $cacheInvalidated) {
+            $response->header('X-Cache-Stale', '1');
+        }
+
+        return $response;
     }
 
     /** DELETE /staff/feature-flags/overrides/{id} — remove an override by its UUID. */
@@ -70,12 +77,24 @@ class StaffFeatureFlagOverrideController extends ApiController
         // Delete by PK (unambiguous), then push-invalidate the scope's cache key.
         $override->delete();
 
-        if ($override->brand_id !== null) {
-            $this->service->forgetBrand($override->brand_id);
-        } else {
-            $this->service->forgetPro($override->professional_id);
+        $cacheInvalidated = true;
+
+        try {
+            if ($override->brand_id !== null) {
+                $this->service->forgetBrand($override->brand_id);
+            } else {
+                $this->service->forgetPro($override->professional_id);
+            }
+        } catch (Throwable $e) {
+            $cacheInvalidated = false;
         }
 
-        return response()->json(null, 204);
+        $response = response()->json(null, 204);
+
+        if (! $cacheInvalidated) {
+            $response->header('X-Cache-Stale', '1');
+        }
+
+        return $response;
     }
 }

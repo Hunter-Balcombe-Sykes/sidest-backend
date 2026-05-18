@@ -22,7 +22,7 @@ class StaffFeatureFlagController extends ApiController
     {
         abort_if($request->attributes->get('partna_staff') === null, 401, 'Unauthenticated');
 
-        $flags = FeatureFlag::withCount('overrides')->orderBy('key')->get();
+        $flags = FeatureFlag::withCount('overrides')->orderBy('key')->paginate(50);
 
         return FeatureFlagResource::collection($flags)->response();
     }

@@ -1,8 +1,8 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "partna/partna-api",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "Partna — affiliate SaaS API (Laravel 12 + Supabase + PostgreSQL).",
     "keywords": [
         "laravel",
         "framework"

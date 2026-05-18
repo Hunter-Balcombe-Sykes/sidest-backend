@@ -728,15 +728,15 @@ return [
         ],
     ],
 
-    'soft_delete_retention_days' => (int) env('SOFT_DELETE_RETENTION_DAYS', 30),
+    'soft_delete_retention_days' => (int) env('PARTNA_SOFT_DELETE_RETENTION_DAYS', env('SOFT_DELETE_RETENTION_DAYS', 30)),
 
-    'analytics_raw_event_retention_days' => (int) env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90),
+    'analytics_raw_event_retention_days' => (int) env('PARTNA_ANALYTICS_RAW_EVENT_RETENTION_DAYS', env('ANALYTICS_RAW_EVENT_RETENTION_DAYS', 90)),
 
     'commerce_analytics' => [
         // SWR cache TTL (seconds) for the affiliate projections endpoint. Push-invalidated on every commerce
         // webhook write via AnalyticsCacheService::invalidateAnalytics(), so this is the upper bound on staleness
         // when no writes happen — not the typical staleness.
-        'projections_ttl_seconds' => (int) env('COMMERCE_PROJECTIONS_TTL_SECONDS', 300),
+        'projections_ttl_seconds' => (int) env('PARTNA_COMMERCE_PROJECTIONS_TTL_SECONDS', env('COMMERCE_PROJECTIONS_TTL_SECONDS', 300)),
 
         // Adaptive window tiers, descending. Service picks the largest tier the affiliate has ≥ days of history for.
         // Below the smallest tier, response returns status=insufficient_data.
@@ -948,8 +948,8 @@ return [
     ],
 
     'form_timing' => [
-        'min_ms' => (int) env('FORM_TIMING_MIN_MS', 2500),      // 2.5s minimum fill time
-        'max_ms' => (int) env('FORM_TIMING_MAX_MS', 43200000),  // 12h max (stale form)
+        'min_ms' => (int) env('PARTNA_FORM_TIMING_MIN_MS', env('FORM_TIMING_MIN_MS', 2500)),      // 2.5s minimum fill time
+        'max_ms' => (int) env('PARTNA_FORM_TIMING_MAX_MS', env('FORM_TIMING_MAX_MS', 43200000)),  // 12h max (stale form)
     ],
 
     'notification_retention_days' => [
@@ -971,7 +971,7 @@ return [
     ],
 
     'notifications' => [
-        'email_enabled' => (bool) env('NOTIFICATIONS_EMAIL_ENABLED', false),
+        'email_enabled' => (bool) env('PARTNA_NOTIFICATIONS_EMAIL_ENABLED', env('NOTIFICATIONS_EMAIL_ENABLED', false)),
 
         /*
          * Category registry — single source of truth.
@@ -1041,7 +1041,7 @@ return [
     */
 
     'gdpr' => [
-        'queue' => env('GDPR_QUEUE', 'gdpr'),
+        'queue' => env('PARTNA_GDPR_QUEUE', env('GDPR_QUEUE', 'gdpr')),
         'redact_placeholder_domain' => env('GDPR_REDACT_PLACEHOLDER_DOMAIN', 'gdpr.partna.au'),
         'export_retention_days' => (int) env('GDPR_EXPORT_RETENTION_DAYS', 30),
         // Signed URL TTL emailed to recipients of a professional data export.
@@ -1098,15 +1098,15 @@ return [
     */
     'cache' => [
         'ttls' => [
-            'public_payload' => (int) env('CACHE_TTL_PUBLIC_PAYLOAD', 900),         // 15m
-            'analytics_short' => (int) env('CACHE_TTL_ANALYTICS_SHORT', 300),        // 5m
-            'auth_id_lookup' => (int) env('CACHE_TTL_AUTH_ID_LOOKUP', 1800),        // 30m
-            'professional_model' => (int) env('CACHE_TTL_PROFESSIONAL_MODEL', 60),      // 60s
-            'professional_handle_lookup' => (int) env('CACHE_TTL_PROFESSIONAL_HANDLE_LOOKUP', 3600), // 60m
-            'webhook_idempotency' => (int) env('CACHE_TTL_WEBHOOK_IDEMPOTENCY', 86400),  // 24h
-            'brand_admin_catalog' => (int) env('CACHE_TTL_BRAND_ADMIN_CATALOG', 300),    // 5m
-            'collection_gid' => (int) env('CACHE_TTL_COLLECTION_GID', 3600),        // 60m
-            'product_custom_photos' => (int) env('CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', 60),   // 60s
+            'public_payload' => (int) env('PARTNA_CACHE_TTL_PUBLIC_PAYLOAD', env('CACHE_TTL_PUBLIC_PAYLOAD', 900)),                                 // 15m
+            'analytics_short' => (int) env('PARTNA_CACHE_TTL_ANALYTICS_SHORT', env('CACHE_TTL_ANALYTICS_SHORT', 300)),                             // 5m
+            'auth_id_lookup' => (int) env('PARTNA_CACHE_TTL_AUTH_ID_LOOKUP', env('CACHE_TTL_AUTH_ID_LOOKUP', 1800)),                               // 30m
+            'professional_model' => (int) env('PARTNA_CACHE_TTL_PROFESSIONAL_MODEL', env('CACHE_TTL_PROFESSIONAL_MODEL', 60)),                     // 60s
+            'professional_handle_lookup' => (int) env('PARTNA_CACHE_TTL_PROFESSIONAL_HANDLE_LOOKUP', env('CACHE_TTL_PROFESSIONAL_HANDLE_LOOKUP', 3600)), // 60m
+            'webhook_idempotency' => (int) env('PARTNA_CACHE_TTL_WEBHOOK_IDEMPOTENCY', env('CACHE_TTL_WEBHOOK_IDEMPOTENCY', 86400)),               // 24h
+            'brand_admin_catalog' => (int) env('PARTNA_CACHE_TTL_BRAND_ADMIN_CATALOG', env('CACHE_TTL_BRAND_ADMIN_CATALOG', 300)),                 // 5m
+            'collection_gid' => (int) env('PARTNA_CACHE_TTL_COLLECTION_GID', env('CACHE_TTL_COLLECTION_GID', 3600)),                               // 60m
+            'product_custom_photos' => (int) env('PARTNA_CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', env('CACHE_TTL_PRODUCT_CUSTOM_PHOTOS', 60)),            // 60s
         ],
     ],
 ];
