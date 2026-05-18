@@ -3,21 +3,28 @@
 namespace App\Http\Controllers\Api\Professional\Brand;
 
 use App\Http\Controllers\Api\ApiController;
+use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ParsesBrandAffiliateInviteCsv;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
+use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
+use App\Models\Core\Professional\BrandPartnerLink;
+use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
 use App\Services\Cache\ProfessionalCacheService;
 use App\Services\Professional\Brand\BrandAffiliateInviteService;
 use App\Services\Professional\Brand\BrandPartnerLinkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 // V2: Brand creates/manages affiliate invitations (single, bulk, CSV). Affiliates claim or decline via token. Core V2 onboarding flow.
 class BrandAffiliateInviteController extends ApiController
 {
+    use NormalizesPerPage;
     use ParsesBrandAffiliateInviteCsv;
     use ResolveCurrentProfessional;
+    use ReturnsPaginatedResponse;
 
     private const BULK_MAX_ROWS = 500;
 
@@ -29,33 +36,106 @@ class BrandAffiliateInviteController extends ApiController
             return $this->error('Only brand accounts can view affiliate invites.', 403);
         }
 
-        $invites = $professional->brandAffiliateInvites()
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(function ($invite): array {
-                $effectiveStatus = $invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()
-                    ? 'expired'
-                    : $invite->status;
+        $perPage = $this->normalizePerPage($request, 25, 100);
 
-                return [
-                    'id' => $invite->id,
-                    'status' => $effectiveStatus,
-                    'invite_type' => $invite->invite_type,
-                    'email' => $invite->email,
-                    'first_name' => $invite->first_name,
-                    'last_name' => $invite->last_name,
-                    'message' => $invite->message,
-                    'token' => $invite->token,
-                    'created_at' => optional($invite->created_at)->toIso8601String(),
-                    'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
-                ];
+        $page = $professional->brandAffiliateInvites()
+            ->orderByDesc('created_at')
+            ->paginate($perPage)
+            ->appends($request->query());
+
+        // Resolve per-invite recipient state for the pending rows: the single-brand
+        // cap means a pending invite to someone already partnered with a different
+        // brand will 422 on acceptance. Surface this so the brand UI can show a
+        // "partnered with another brand" badge instead of leaving the invite
+        // looking actionable. Scoped to the current page so cost is O(per_page),
+        // not O(total invites).
+        $partneredEmails = $this->resolveEmailsPartneredWithOtherBrands(
+            (string) $professional->id,
+            $page->getCollection()->pluck('email_lc')->filter()->unique()->values()->all(),
+        );
+
+        $invites = $page->getCollection()->map(function ($invite) use ($partneredEmails): array {
+            $effectiveStatus = $invite->status === 'pending' && $invite->expires_at && $invite->expires_at->isPast()
+                ? 'expired'
+                : $invite->status;
+
+            $emailLc = is_string($invite->email_lc) ? $invite->email_lc : null;
+            $partneredElsewhere = $effectiveStatus === 'pending'
+                && $emailLc !== null
+                && isset($partneredEmails[$emailLc]);
+
+            return [
+                'id' => $invite->id,
+                'status' => $effectiveStatus,
+                'invite_type' => $invite->invite_type,
+                'email' => $invite->email,
+                'first_name' => $invite->first_name,
+                'last_name' => $invite->last_name,
+                'message' => $invite->message,
+                'token' => $invite->token,
+                'created_at' => optional($invite->created_at)->toIso8601String(),
+                'accepted_at' => optional($invite->accepted_at)->toIso8601String(),
+                'recipient_partnered_elsewhere' => $partneredElsewhere,
+            ];
+        })->values()->all();
+
+        $payload = $this->paginatedResponse($page, 'invites');
+        $payload['invites'] = $invites;
+
+        return $this->success($payload);
+    }
+
+    /**
+     * Map of normalized email → true for recipients who currently hold a
+     * BrandPartnerLink to any brand other than the one calling this endpoint.
+     *
+     * @param  array<int, string>  $emails
+     * @return array<string, true>
+     */
+    private function resolveEmailsPartneredWithOtherBrands(string $brandProfessionalId, array $emails): array
+    {
+        if ($emails === []) {
+            return [];
+        }
+
+        $professionals = Professional::query()
+            ->where(function ($query) use ($emails) {
+                $query->whereIn(DB::raw('LOWER(primary_email)'), $emails)
+                    ->orWhereIn(DB::raw('LOWER(public_contact_email)'), $emails);
             })
-            ->values()
+            ->get(['id', 'primary_email', 'public_contact_email']);
+
+        if ($professionals->isEmpty()) {
+            return [];
+        }
+
+        $partneredProfessionalIds = BrandPartnerLink::query()
+            ->whereIn('affiliate_professional_id', $professionals->pluck('id')->all())
+            ->where('brand_professional_id', '!=', $brandProfessionalId)
+            ->pluck('affiliate_professional_id')
+            ->map(fn ($id) => (string) $id)
+            ->flip()
             ->all();
 
-        return $this->success([
-            'invites' => $invites,
-        ]);
+        if ($partneredProfessionalIds === []) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($professionals as $pro) {
+            if (! isset($partneredProfessionalIds[(string) $pro->id])) {
+                continue;
+            }
+
+            foreach ([$pro->primary_email, $pro->public_contact_email] as $email) {
+                $normalized = is_string($email) ? mb_strtolower(trim($email)) : '';
+                if ($normalized !== '') {
+                    $result[$normalized] = true;
+                }
+            }
+        }
+
+        return $result;
     }
 
     public function store(Request $request, BrandAffiliateInviteService $inviteService): JsonResponse

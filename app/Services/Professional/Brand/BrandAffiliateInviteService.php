@@ -3,11 +3,11 @@
 namespace App\Services\Professional\Brand;
 
 use App\Enums\BrandStatus;
-use App\Models\Core\Notifications\Notification;
 use App\Models\Core\Professional\BrandAffiliateInvite;
 use App\Models\Core\Professional\BrandPartnerLink;
 use App\Models\Core\Professional\Professional;
 use App\Models\Core\Site\Site;
+use App\Services\Notifications\NotificationPublisher;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +23,8 @@ class BrandAffiliateInviteService
     private const NON_ACCEPTED_STATUSES = ['pending', 'expired', 'declined'];
 
     public function __construct(
-        private readonly BrandPartnerLinkService $brandPartnerLinks
+        private readonly BrandPartnerLinkService $brandPartnerLinks,
+        private readonly ?NotificationPublisher $notificationPublisher = null,
     ) {}
 
     public function checkRecipientAvailability(Professional $brand, ?string $email, ?string $phone): array
@@ -664,10 +665,17 @@ class BrandAffiliateInviteService
             return;
         }
 
+        // Route through NotificationPublisher so the standard pipeline runs:
+        // dedupe via (professional_id, dedupe_key), retention from config, and
+        // conditional email dispatch via SendTransactionalNotificationEmailJob
+        // (category 'invites' → InviteNotificationMail). The nullable
+        // constructor arg keeps legacy `new BrandAffiliateInviteService(new
+        // BrandPartnerLinkService)` call sites working — they resolve the
+        // publisher from the container at notify time.
+        $publisher = $this->notificationPublisher ?? app(NotificationPublisher::class);
         $brandName = trim((string) ($brand->display_name ?: $brand->handle ?: 'this brand'));
-        $now = now();
-        $notifications = [];
 
+        $items = [];
         foreach ($professionals as $professional) {
             $primaryEmail = $this->normalizeEmail((string) ($professional->primary_email ?? ''));
             $publicEmail = $this->normalizeEmail((string) ($professional->public_contact_email ?? ''));
@@ -683,26 +691,24 @@ class BrandAffiliateInviteService
                 continue;
             }
 
-            $notifications[] = [
-                'professional_id' => $professional->id,
-                'type' => 'Invitation',
+            // dedupe_key is per-invite so a resend (which goes through this
+            // batch again via createOrRefreshInvite) does not double-notify.
+            $items[] = [
+                'professionalId' => (string) $professional->id,
+                'frontendType' => 'Invitation',
+                'category' => 'invites',
                 'title' => 'New brand partner invitation!',
                 'body' => "You have a new invite to become a brand partner of {$brandName}",
-                'cta_url' => "/brand-affiliate-invites/{$matchingInvite->token}/claim",
-                'primary_action_label' => 'Accept Invitation',
-                'secondary_action_label' => 'Decline Invitation',
-                'secondary_action_url' => "/brand-affiliate-invites/{$matchingInvite->token}/decline",
-                'severity' => Notification::severityForFrontendType('Invitation'),
-                'starts_at' => $now,
-                'ends_at' => null,
-                'created_at' => $now,
-                'updated_at' => $now,
+                'dedupeKey' => "invite:{$matchingInvite->id}",
+                'ctaUrl' => "/brand-affiliate-invites/{$matchingInvite->token}/claim",
+                'primaryActionLabel' => 'Accept Invitation',
+                'secondaryActionLabel' => 'Decline Invitation',
+                'secondaryActionUrl' => "/brand-affiliate-invites/{$matchingInvite->token}/decline",
+                'retentionConfigKey' => 'invite',
             ];
         }
 
-        if ($notifications !== []) {
-            DB::table('notifications.notifications')->insert($notifications);
-        }
+        $publisher->publishMany($items);
     }
 
     private function expirePendingInvitesByBrandEmail(string $brandProfessionalId, string $normalizedEmail): void

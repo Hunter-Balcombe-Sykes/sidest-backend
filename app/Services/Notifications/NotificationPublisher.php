@@ -94,6 +94,103 @@ class NotificationPublisher
         }
     }
 
+    /**
+     * Bulk variant of {@see publish()}. One insertOrIgnore + one select-back to
+     * identify genuinely-new rows, then a per-row email dispatch only for those.
+     * Use for fan-out (e.g. brand-affiliate invite batches) — single-shot
+     * callers should keep using publish().
+     *
+     * Each item must supply the same keys as publish()'s named args (minus the
+     * email-dispatch trigger). Items with empty professional_id, title, body,
+     * or dedupe_key are silently skipped.
+     *
+     * @param  array<int, array{
+     *     professionalId: string,
+     *     frontendType: string,
+     *     category: string,
+     *     title: string,
+     *     body: string,
+     *     dedupeKey: string,
+     *     ctaUrl?: string|null,
+     *     primaryActionLabel?: string|null,
+     *     secondaryActionLabel?: string|null,
+     *     secondaryActionUrl?: string|null,
+     *     retentionConfigKey?: string|null,
+     * }>  $items
+     */
+    public function publishMany(array $items): void
+    {
+        if ($items === []) {
+            return;
+        }
+
+        $now = now();
+        $rows = [];
+        $idToCategoryAndPro = [];
+
+        foreach ($items as $item) {
+            $professionalId = trim((string) ($item['professionalId'] ?? ''));
+            $title = trim((string) ($item['title'] ?? ''));
+            $body = trim((string) ($item['body'] ?? ''));
+            $dedupeKey = trim((string) ($item['dedupeKey'] ?? ''));
+            if ($professionalId === '' || $title === '' || $body === '' || $dedupeKey === '') {
+                continue;
+            }
+
+            $type = Notification::normalizeFrontendType((string) ($item['frontendType'] ?? ''));
+            $category = (string) ($item['category'] ?? '');
+            $retentionKey = $item['retentionConfigKey'] ?? 'default';
+            $days = config("partna.notification_retention_days.{$retentionKey}")
+                ?? config('partna.notification_retention_days.default', 30);
+            $notificationId = (string) Str::uuid();
+
+            $rows[] = [
+                'id' => $notificationId,
+                'professional_id' => $professionalId,
+                'type' => $type,
+                'category' => $category,
+                'title' => $title,
+                'body' => $body,
+                'cta_url' => $item['ctaUrl'] ?? '/account/overview',
+                'primary_action_label' => $item['primaryActionLabel'] ?? 'View',
+                'secondary_action_label' => $item['secondaryActionLabel'] ?? 'Dismiss',
+                'secondary_action_url' => $item['secondaryActionUrl'] ?? null,
+                'severity' => Notification::severityForFrontendType($type),
+                'starts_at' => $now,
+                'ends_at' => $now->copy()->addDays((int) $days),
+                'dedupe_key' => $dedupeKey,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            $idToCategoryAndPro[$notificationId] = [$category, $professionalId];
+        }
+
+        if ($rows === []) {
+            return;
+        }
+
+        DB::table('notifications.notifications')->insertOrIgnore($rows);
+
+        if (! config('partna.notifications.email_enabled', false)) {
+            return;
+        }
+
+        // Select back the IDs that actually landed. Conflicting rows (same
+        // professional_id + dedupe_key already present) were ignored, so their
+        // UUIDs won't be in the table.
+        $insertedIds = DB::table('notifications.notifications')
+            ->whereIn('id', array_keys($idToCategoryAndPro))
+            ->pluck('id')
+            ->all();
+
+        foreach ($insertedIds as $id) {
+            [$category, $professionalId] = $idToCategoryAndPro[$id];
+            SendTransactionalNotificationEmailJob::dispatch($id, $category, $professionalId)
+                ->onQueue('mail');
+        }
+    }
+
     public static function resolveEmailEnabled(string $professionalId, string $category): bool
     {
         // Per-professional policy

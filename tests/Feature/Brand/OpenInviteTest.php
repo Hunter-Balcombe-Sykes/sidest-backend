@@ -575,6 +575,119 @@ it('keeps an email invite pending when the cap blocks acceptance', function () {
         ->exists())->toBeTrue();
 });
 
+it('routes invite notifications through NotificationPublisher with category invites', function () {
+    $brand = createBrand('publisherbrand', 'ready_for_affiliates');
+
+    // Seed an existing professional that matches the invite email so
+    // notifyExistingEmailRecipientsBatch has someone to notify.
+    $recipientId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $recipientId,
+        'auth_user_id' => 'auth-'.Str::random(8),
+        'handle' => 'publisherrecipient',
+        'handle_lc' => 'publisherrecipient',
+        'display_name' => 'Pub Recipient',
+        'primary_email' => 'invitee@example.com',
+        'professional_type' => 'professional',
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $publisher = Mockery::mock(\App\Services\Notifications\NotificationPublisher::class);
+    $publisher->shouldReceive('publishMany')
+        ->once()
+        ->with(Mockery::on(function (array $items) use ($recipientId): bool {
+            if (count($items) !== 1) {
+                return false;
+            }
+            $item = $items[0];
+
+            return $item['professionalId'] === $recipientId
+                && $item['category'] === 'invites'
+                && $item['frontendType'] === 'Invitation'
+                && $item['retentionConfigKey'] === 'invite'
+                && str_starts_with((string) $item['dedupeKey'], 'invite:');
+        }));
+
+    $service = new BrandAffiliateInviteService(new BrandPartnerLinkService, $publisher);
+    $service->createInvite($brand, [
+        'email' => 'invitee@example.com',
+        'expiration' => '30d',
+    ]);
+});
+
+it('flags invites whose recipient is already partnered with another brand', function () {
+    $brandA = createBrand('brandalready', 'ready_for_affiliates');
+    $brandB = createBrand('brandinviting', 'ready_for_affiliates');
+
+    // Recipient is already partnered with Brand A.
+    $recipientId = (string) Str::uuid();
+    $now = now()->toDateTimeString();
+    DB::connection('pgsql')->table('core.professionals')->insert([
+        'id' => $recipientId,
+        'auth_user_id' => 'auth-'.Str::random(8),
+        'handle' => 'flagrecipient',
+        'handle_lc' => 'flagrecipient',
+        'display_name' => 'Flag Recipient',
+        'primary_email' => 'flagged@example.com',
+        'professional_type' => 'professional',
+        'status' => 'active',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+    DB::connection('pgsql')->table('brand.brand_partner_links')->insert([
+        'id' => (string) Str::uuid(),
+        'affiliate_professional_id' => $recipientId,
+        'brand_professional_id' => $brandA->id,
+        'slot' => 0,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    // Brand B has issued a pending invite to the same email.
+    DB::connection('pgsql')->table('brand.brand_affiliate_invites')->insert([
+        'id' => (string) Str::uuid(),
+        'brand_professional_id' => $brandB->id,
+        'token' => Str::random(48),
+        'status' => 'pending',
+        'invite_type' => 'personalised',
+        'email' => 'flagged@example.com',
+        'email_lc' => 'flagged@example.com',
+        'expires_at' => now()->addDays(30)->toDateTimeString(),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+    // And an unrelated pending invite to someone with no existing connection.
+    DB::connection('pgsql')->table('brand.brand_affiliate_invites')->insert([
+        'id' => (string) Str::uuid(),
+        'brand_professional_id' => $brandB->id,
+        'token' => Str::random(48),
+        'status' => 'pending',
+        'invite_type' => 'personalised',
+        'email' => 'fresh@example.com',
+        'email_lc' => 'fresh@example.com',
+        'expires_at' => now()->addDays(30)->toDateTimeString(),
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $request = Request::create('/api/professional/brand-affiliate-invites', 'GET');
+    $request->attributes->set('professional', $brandB);
+
+    $controller = new \App\Http\Controllers\Api\Professional\Brand\BrandAffiliateInviteController;
+    $response = $controller->index($request);
+    $data = $response->getData(true);
+
+    expect($response->status())->toBe(200);
+    expect($data['invites'])->toHaveCount(2);
+
+    $byEmail = collect($data['invites'])->keyBy('email');
+    expect($byEmail['flagged@example.com']['recipient_partnered_elsewhere'])->toBeTrue();
+    expect($byEmail['fresh@example.com']['recipient_partnered_elsewhere'])->toBeFalse();
+});
+
 it('claimOpenInvite throws when affiliate has no site', function () {
     $brand = createBrand('sitelessbrand');
 
