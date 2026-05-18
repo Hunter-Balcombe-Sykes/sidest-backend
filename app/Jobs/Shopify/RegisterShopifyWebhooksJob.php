@@ -75,13 +75,18 @@ class RegisterShopifyWebhooksJob implements ShouldBeUnique, ShouldQueue
 
     // GDPR compliance topics (CUSTOMERS_DATA_REQUEST, CUSTOMERS_REDACT, SHOP_REDACT) cannot be
     // registered via the GraphQL API — they are handled via shopify.app.toml compliance_topics.
+    //
+    // SHOP_UPDATE + THEMES_PUBLISH used to subscribe here so the platform could auto-pull
+    // brand profile + design changes from Shopify on every shop edit / theme publish. That
+    // was overwriting brand edits made in Sidest in situations they didn't expect, so the
+    // resync is now only run on first connect / reinstall or when the brand clicks
+    // "Resync from Shopify". The receiver routes still exist but no-op; we just stop
+    // subscribing new brands. Existing subscriptions on already-installed shops stay
+    // dormant and harmless.
     private const WEBHOOKS = [
         'ORDERS_PAID' => '/api/webhooks/shopify/orders-paid',
         'ORDERS_UPDATED' => '/api/webhooks/shopify/orders-updated',
         'APP_UNINSTALLED' => '/api/webhooks/shopify/app-uninstalled',
-        'SHOP_UPDATE' => '/api/webhooks/shopify/shop-update',
-        // Triggers a brand design re-sync whenever the merchant publishes a new theme.
-        'THEMES_PUBLISH' => '/api/webhooks/shopify/themes-publish',
     ];
 
     /** Populated by handle() — not serialized. */

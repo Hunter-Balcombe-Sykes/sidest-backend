@@ -8,6 +8,13 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// The shop/update webhook used to dispatch ProcessShopifyShopUpdateJob to auto-pull
+// brand profile + design changes from Shopify. That auto-resync was overwriting
+// brand edits in Sidest the merchant didn't expect, so the dispatch is now a no-op
+// — the controller validates HMAC + dedups + returns 200 but never enqueues work.
+// These tests assert the no-op behaviour so future regressions don't quietly
+// re-introduce auto-resync.
+
 beforeEach(function () {
     Bus::fake();
     Cache::flush();
@@ -40,7 +47,7 @@ it('shop/update — bad HMAC returns 401, no dispatch', function () {
     Bus::assertNotDispatched(ProcessShopifyShopUpdateJob::class);
 });
 
-it('shop/update — valid HMAC dispatches ProcessShopifyShopUpdateJob with payload', function () {
+it('shop/update — valid HMAC 200s as a no-op (auto-resync disabled)', function () {
     $proId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -60,10 +67,10 @@ it('shop/update — valid HMAC dispatches ProcessShopifyShopUpdateJob with paylo
         'X-Shopify-Webhook-Id' => (string) Str::uuid(),
     ])->assertOk();
 
-    Bus::assertDispatched(ProcessShopifyShopUpdateJob::class);
+    Bus::assertNotDispatched(ProcessShopifyShopUpdateJob::class);
 });
 
-it('shop/update — duplicate webhook_id returns duplicate=true and skips dispatch', function () {
+it('shop/update — duplicate webhook_id returns duplicate=true', function () {
     $proId = (string) Str::uuid();
     DB::table('core.professional_integrations')->insert([
         'id' => (string) Str::uuid(),
@@ -87,7 +94,7 @@ it('shop/update — duplicate webhook_id returns duplicate=true and skips dispat
         ->assertOk()
         ->assertJson(['received' => true, 'duplicate' => true]);
 
-    Bus::assertDispatchedTimes(ProcessShopifyShopUpdateJob::class, 1);
+    Bus::assertNotDispatched(ProcessShopifyShopUpdateJob::class);
 });
 
 it('shop/update — bad HMAC is always rejected even for a previously-seen webhook ID', function () {
@@ -111,14 +118,13 @@ it('shop/update — bad HMAC is always rejected even for a previously-seen webho
         'X-Shopify-Webhook-Id' => $webhookId,
     ])->assertOk();
 
-    // HMAC check is always first — bad signature is rejected regardless of dedup state.
     $this->postJson('/api/webhooks/shopify/shop-update', $payload, [
         'X-Shopify-Hmac-SHA256' => 'bad-hmac',
         'X-Shopify-Shop-Domain' => 'brand-a.myshopify.com',
         'X-Shopify-Webhook-Id' => $webhookId,
     ])->assertStatus(401);
 
-    Bus::assertDispatchedTimes(ProcessShopifyShopUpdateJob::class, 1);
+    Bus::assertNotDispatched(ProcessShopifyShopUpdateJob::class);
 });
 
 it('shop/update — unknown shop_domain 200s without dispatch', function () {
