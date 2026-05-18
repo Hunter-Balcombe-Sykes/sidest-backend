@@ -19,6 +19,8 @@ use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffShopifyResync
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSiteManagementController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffStoreSettingsController;
 use App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffSubscriptionManagementController;
+use App\Http\Controllers\Api\Staff\FeatureFlag\StaffFeatureFlagController;
+use App\Http\Controllers\Api\Staff\FeatureFlag\StaffFeatureFlagOverrideController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAccountDeletionController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffAnalyticsController;
 use App\Http\Controllers\Api\Staff\StaffSite\StaffMeController;
@@ -233,6 +235,22 @@ Route::prefix('staff')
 
         // Override brand commission rate and payout hold days (admin only)
         Route::patch('/professionals/{professional}/store-settings', [StaffStoreSettingsController::class, 'update']);
+
+        // Feature flag admin — create/update/delete flags and per-tenant overrides.
+        Route::prefix('feature-flags')->group(function (): void {
+            Route::get('/', [StaffFeatureFlagController::class, 'index']);
+            Route::post('/', [StaffFeatureFlagController::class, 'store']);
+            Route::patch('{key}', [StaffFeatureFlagController::class, 'update'])
+                ->where('key', '[a-z0-9_.-]+');
+            Route::delete('{key}', [StaffFeatureFlagController::class, 'destroy'])
+                ->where('key', '[a-z0-9_.-]+');
+            Route::get('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'index'])
+                ->where('key', '[a-z0-9_.-]+');
+            Route::post('{key}/overrides', [StaffFeatureFlagOverrideController::class, 'store'])
+                ->where('key', '[a-z0-9_.-]+');
+            Route::delete('overrides/{id}', [StaffFeatureFlagOverrideController::class, 'destroy'])
+                ->whereUuid('id');
+        });
 
         // GDPR-triggered erasure: support invokes the same lifecycle as self-service
         // but skips the email-token step. Reason field is mandatory.
