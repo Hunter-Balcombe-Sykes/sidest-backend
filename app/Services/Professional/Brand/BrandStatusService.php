@@ -299,9 +299,16 @@ class BrandStatusService
             return false;
         }
 
+        // The user-facing label for this requirement is "Upload 5 site page
+        // image defaults" — those are POOL_DESIGN / PURPOSE_PLACEHOLDER rows
+        // (storefront placeholders the brand uploads via the design tab).
+        // Previously this counted POOL_CONTENT which the UI doesn't expose
+        // a path to populate, so brands hit the upload limit on placeholders
+        // but never advanced to ReadyForAffiliates.
         $count = SiteMedia::query()
             ->where('site_id', $site->id)
-            ->where('pool', SiteMedia::POOL_CONTENT)
+            ->where('pool', SiteMedia::POOL_DESIGN)
+            ->where('purpose', SiteMedia::PURPOSE_PLACEHOLDER)
             ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
             ->where('is_active', true)
             ->whereNull('deleted_at')
