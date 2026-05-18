@@ -18,7 +18,8 @@ function indexCoverageSuiteIsPostgres(): bool
 }
 
 /**
- * Assert that a named index exists on the given schema.table.
+ * Assert that a named index exists on the given schema.table and is VALID
+ * (not an INVALID stub left over from a cancelled CONCURRENTLY build).
  *
  * @param  string  $schema  e.g. 'site'
  * @param  string  $table   e.g. 'sites'
@@ -27,16 +28,20 @@ function indexCoverageSuiteIsPostgres(): bool
 function assertIndexExists(string $schema, string $table, string $index): void
 {
     $row = DB::selectOne(
-        "SELECT 1
-           FROM pg_indexes
-          WHERE schemaname = ?
-            AND tablename  = ?
-            AND indexname  = ?",
-        [$schema, $table, $index]
+        "SELECT i.indisvalid
+           FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indexrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ?
+            AND c.relname = ?",
+        [$schema, $index]
     );
 
     expect($row)->not->toBeNull(
         "Expected index [{$index}] on [{$schema}.{$table}] but it was not found."
+    );
+    expect((bool) $row->indisvalid)->toBeTrue(
+        "Index [{$index}] exists but is INVALID — drop the stub and re-run the migration."
     );
 }
 
