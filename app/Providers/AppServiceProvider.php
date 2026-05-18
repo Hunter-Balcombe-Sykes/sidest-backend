@@ -70,6 +70,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(\App\Models\Core\Gdpr\GdprRequest::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Core\Gdpr\DataExportAudit::class, \App\Policies\GdprPolicy::class);
         Gate::policy(\App\Models\Commerce\AffiliateProductSelection::class, \App\Policies\AffiliateProductPolicy::class);
+        Gate::policy(\App\Models\Core\FeatureFlag::class, \App\Policies\FeatureFlagPolicy::class);
+        Gate::policy(\App\Models\Core\FeatureFlagOverride::class, \App\Policies\FeatureFlagPolicy::class);
 
         // Refuse to boot in production with throttling disabled — a misconfigured
         // PARTNA_THROTTLE_ENABLED=false would silently strip all rate limiting.
