@@ -130,37 +130,6 @@ class BrandPartnerController extends ApiController
         return $this->success($payload);
     }
 
-    public function promote(
-        Request $request,
-        string $brandProfessionalId,
-        BrandPartnerLinkService $brandPartnerLinks,
-        BrandPartnerSiteSettingsSync $sync,
-    ): JsonResponse {
-        $professional = $this->currentProfessional($request);
-
-        if (mb_strtolower(trim((string) $professional->professional_type)) === 'brand') {
-            return $this->error('Brand accounts cannot manage brand partner connections.', 403);
-        }
-
-        $site = Site::query()->where('professional_id', $professional->id)->first();
-        if (! $site) {
-            return $this->error('Site not found.', 404);
-        }
-
-        $promoted = $brandPartnerLinks->promoteBrandToPrimary((string) $professional->id, (string) $brandProfessionalId);
-        if (! $promoted) {
-            return $this->error('Brand partner not found in your additional partners.', 404);
-        }
-
-        $sync->sync($site, (string) $professional->id);
-        $sync->invalidateAffiliateCaches($site);
-
-        return $this->success([
-            'promoted' => true,
-            'primary_professional_id' => $brandProfessionalId,
-        ]);
-    }
-
     public function disconnect(
         Request $request,
         string $brandProfessionalId,

@@ -168,7 +168,6 @@ class BootstrapController extends ApiController
                         $brandPartnerLinks->connectBrandToAffiliate($affiliateId, $brandId);
                     }
 
-                    $brandPartnerLinks->promoteBrandToPrimary($affiliateId, $brandId);
                     $this->syncSiteBrandPartnerSettings($site, $brandPartnerLinks, $affiliateId);
                     $accountTypeDefaultsService->applyAffiliateDefaults($professional, $site);
                 } elseif (is_string($data['join_brand_handle'] ?? null) && trim((string) $data['join_brand_handle']) !== '') {

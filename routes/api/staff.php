@@ -424,16 +424,6 @@ Route::prefix('staff')
         Route::post('/professionals/{professional}/deletion/cancel', [StaffAccountDeletionController::class, 'cancel'])
             ->withTrashed();
 
-        // Promote an additional brand-partner connection to primary on behalf of an
-        // affiliate (admin only). Mirrors self-service BrandPartnerController::promote.
-        // withoutScopedBindings(): {affiliate} and {brand} are independent Professional
-        // models — not parent/child.
-        Route::middleware('throttle:30,1')->withoutScopedBindings()->group(function (): void {
-            Route::post('/professionals/{affiliate}/brand-partners/{brand}/promote',
-                [\App\Http\Controllers\Api\Staff\ProfessionalSiteManagement\StaffBrandPartnerController::class, 'promote'])
-                ->whereUuid(['affiliate', 'brand']);
-        });
-
         // Manually create or remove brand-affiliate links (admin only).
         // withoutScopedBindings(): {brand} and {affiliate} are two independent
         // Professional models — not parent/child. scopeBindings() would try to

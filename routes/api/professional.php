@@ -128,8 +128,6 @@ Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly
         Route::get('/brand-partners', [BrandPartnerController::class, 'index']);
         Route::post('/brand-partners/{brandProfessionalId}/connect', [BrandPartnerController::class, 'connect'])
             ->whereUuid('brandProfessionalId');
-        Route::post('/brand-partners/{brandProfessionalId}/promote', [BrandPartnerController::class, 'promote'])
-            ->whereUuid('brandProfessionalId');
 
         // View Site Details
         Route::get('/site', [ProfessionalSiteController::class, 'show']);

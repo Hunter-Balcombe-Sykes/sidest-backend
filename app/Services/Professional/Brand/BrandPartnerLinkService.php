@@ -8,12 +8,14 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
-// V2: Manages brand-affiliate connections (up to 1 primary + 3 additional slots). V2 simplifies to single-brand model.
+// Pilot/V1: each affiliate is connected to exactly one brand partner (slot 0).
+// The schema (slot CHECK 0..3, unique (affiliate, slot)) still supports up to four,
+// so this cap can be relaxed by bumping MAX_ADDITIONAL_PARTNERS without a migration.
 class BrandPartnerLinkService
 {
     public const PRIMARY_SLOT = 0;
 
-    public const MAX_ADDITIONAL_PARTNERS = 3;
+    public const MAX_ADDITIONAL_PARTNERS = 0;
 
     public function getLinksForAffiliate(string $affiliateProfessionalId): Collection
     {
@@ -62,7 +64,7 @@ class BrandPartnerLinkService
 
             $slot = $this->determineNextSlot($links);
             if ($slot === null) {
-                throw new RuntimeException('All brand partner slots are full. Please remove an existing brand partner before accepting this invite.');
+                throw new RuntimeException('You are already connected to a brand partner. Disconnect from your current brand partner before connecting to a new one.');
             }
 
             $link = BrandPartnerLink::query()->create([
@@ -109,39 +111,6 @@ class BrandPartnerLinkService
                     $newPrimary->slot = self::PRIMARY_SLOT;
                     $newPrimary->save();
                 }
-            }
-
-            $this->normalizeAdditionalSlots($affiliateProfessionalId);
-
-            return true;
-        });
-    }
-
-    public function promoteBrandToPrimary(string $affiliateProfessionalId, string $brandProfessionalId): bool
-    {
-        return DB::transaction(function () use ($affiliateProfessionalId, $brandProfessionalId): bool {
-            $links = BrandPartnerLink::query()
-                ->where('affiliate_professional_id', $affiliateProfessionalId)
-                ->orderBy('slot')
-                ->lockForUpdate()
-                ->get();
-
-            /** @var BrandPartnerLink|null $target */
-            $target = $links->firstWhere('brand_professional_id', $brandProfessionalId);
-            if (! $target || (int) $target->slot === self::PRIMARY_SLOT) {
-                return false;
-            }
-
-            $targetSlot = (int) $target->slot;
-            /** @var BrandPartnerLink|null $currentPrimary */
-            $currentPrimary = $links->first(fn (BrandPartnerLink $link): bool => (int) $link->slot === self::PRIMARY_SLOT);
-
-            $target->slot = self::PRIMARY_SLOT;
-            $target->save();
-
-            if ($currentPrimary) {
-                $currentPrimary->slot = $targetSlot;
-                $currentPrimary->save();
             }
 
             $this->normalizeAdditionalSlots($affiliateProfessionalId);

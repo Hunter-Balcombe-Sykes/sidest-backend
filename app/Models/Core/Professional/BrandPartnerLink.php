@@ -7,7 +7,9 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Brand-affiliate connection record. V2 uses single-brand model (slot 0 = primary, one brand per affiliate).
+ * Brand-affiliate connection record. Pilot/V1 caps each affiliate to a single
+ * connection (slot 0). Slot column and DB CHECK still allow 0..3 so the cap can
+ * be raised in BrandPartnerLinkService without a migration.
  *
  * @property string|null $site_url Trigger-managed by Postgres; read-only — never mass-assign.
  */
