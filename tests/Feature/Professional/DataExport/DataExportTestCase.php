@@ -182,7 +182,32 @@ class DataExportTestCase
             id TEXT PRIMARY KEY,
             professional_id TEXT,
             email_lc TEXT,
+            list_key TEXT,
+            email TEXT,
+            full_name TEXT,
+            status TEXT,
+            subscribed_at TEXT,
+            unsubscribed_at TEXT,
+            consent_source TEXT,
             created_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_preferences (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            category TEXT,
+            opted_in INTEGER,
+            created_at TEXT,
+            updated_at TEXT
+        )');
+
+        $conn->statement('CREATE TABLE IF NOT EXISTS notifications.notification_email_policies (
+            id TEXT PRIMARY KEY,
+            professional_id TEXT,
+            category TEXT,
+            policy TEXT,
+            created_at TEXT,
+            updated_at TEXT
         )');
 
         $conn->statement('CREATE TABLE IF NOT EXISTS analytics.booking_events (
@@ -204,6 +229,12 @@ class DataExportTestCase
             id TEXT PRIMARY KEY,
             professional_id TEXT,
             customer_id TEXT,
+            occurred_at TEXT,
+            outcome TEXT,
+            form_started_at_ms INTEGER,
+            subdomain TEXT,
+            site_id TEXT,
+            referrer TEXT,
             created_at TEXT
         )');
 

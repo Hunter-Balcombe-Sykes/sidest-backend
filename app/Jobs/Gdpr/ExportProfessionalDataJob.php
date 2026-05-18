@@ -66,8 +66,10 @@ class ExportProfessionalDataJob implements ShouldQueue
         $tmpPath = null;
 
         try {
-            $payload = $builder->build($audit->professional_id);
-            $written = $writer->write($payload);
+            // writeStreaming() drives the builder row-by-row so a tenant with
+            // tens of thousands of customers/orders never materialises the
+            // full payload in PHP memory. GDPR right-of-access must not OOM.
+            $written = $writer->writeStreaming($builder, $audit->professional_id);
             $tmpPath = $written['path'];
 
             $disk = Storage::disk(config('partna.media_disk'));
