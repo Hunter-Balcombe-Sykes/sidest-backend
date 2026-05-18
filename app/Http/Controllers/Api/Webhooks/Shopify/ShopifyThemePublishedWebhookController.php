@@ -4,15 +4,26 @@ namespace App\Http\Controllers\Api\Webhooks\Shopify;
 
 use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\ValidatesShopifyWebhookHmac;
-use App\Jobs\Shopify\SyncShopifyBrandDesignJob;
 use App\Models\Core\Professional\ProfessionalIntegration;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-// Receives Shopify themes/publish webhooks. When a brand publishes a new theme,
-// this re-syncs their brand design tokens (colours, logos, radius) into the platform.
+// Receives Shopify themes/publish webhooks.
+//
+// Used to auto-dispatch SyncShopifyBrandDesignJob on every theme publish —
+// that has been intentionally removed. Brand design is now only pulled from
+// Shopify on first connect / reinstall (BrandSignupService::handleReinstall)
+// or when the brand explicitly clicks "Resync from Shopify"
+// (ShopifyResyncController / BrandDesignController::resync). Auto-syncing on
+// every Shopify theme publish was overwriting user edits in Sidest in
+// situations the brand didn't expect.
+//
+// The endpoint still validates HMAC + dedups (so Shopify doesn't suspend the
+// subscription) and returns 200 — it's just a no-op now. RegisterShopifyWebhooksJob
+// no longer subscribes new brands to this topic; existing subscriptions stay
+// harmlessly dormant.
 class ShopifyThemePublishedWebhookController extends ApiController
 {
     use ValidatesShopifyWebhookHmac;
@@ -32,7 +43,6 @@ class ShopifyThemePublishedWebhookController extends ApiController
             return $this->error('invalid signature', 401);
         }
 
-        // Deduplicate: Shopify may deliver the same webhook ID more than once.
         if ($webhookId !== '') {
             $dedupeKey = "shopify:webhook:themes-publish:{$webhookId}";
             if (! Cache::add($dedupeKey, true, (int) config('partna.cache.ttls.webhook_idempotency'))) {
@@ -45,16 +55,13 @@ class ShopifyThemePublishedWebhookController extends ApiController
             ->where('provider', ProfessionalIntegration::PROVIDER_SHOPIFY)
             ->first();
 
-        if (! $integration) {
-            Log::warning('Shopify themes/publish webhook: unknown shop domain', [
+        if ($integration) {
+            Log::info('Shopify themes/publish webhook ignored — auto-resync disabled.', [
+                'integration_id' => (string) $integration->id,
                 'shop_domain' => $shopDomain,
             ]);
-
-            return $this->success(['received' => true]);
         }
 
-        SyncShopifyBrandDesignJob::dispatch((string) $integration->id);
-
-        return $this->success(['received' => true]);
+        return $this->success(['received' => true, 'ignored' => true]);
     }
 }
