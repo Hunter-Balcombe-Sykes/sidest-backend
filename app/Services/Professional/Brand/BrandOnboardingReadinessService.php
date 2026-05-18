@@ -52,10 +52,14 @@ class BrandOnboardingReadinessService
 
     private function checkSiteImages(?Site $site): array
     {
+        // Matches BrandStatusService::hasMinimumImages — counts the design-pool
+        // placeholder images the user uploads via the storefront design tab
+        // (label: "Upload 5 site page image defaults"). Must stay in sync.
         $count = $site
             ? SiteMedia::query()
                 ->where('site_id', $site->id)
-                ->where('pool', SiteMedia::POOL_CONTENT)
+                ->where('pool', SiteMedia::POOL_DESIGN)
+                ->where('purpose', SiteMedia::PURPOSE_PLACEHOLDER)
                 ->where('media_type', SiteMedia::MEDIA_TYPE_IMAGE)
                 ->where('is_active', true)
                 ->whereNull('deleted_at')
