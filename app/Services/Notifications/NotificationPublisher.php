@@ -4,6 +4,8 @@ namespace App\Services\Notifications;
 
 use App\Jobs\Notifications\SendTransactionalNotificationEmailJob;
 use App\Models\Core\Notifications\Notification;
+use App\Services\Cache\CacheLockService;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -287,24 +289,27 @@ class NotificationPublisher
     {
         $key = self::cacheKey($professionalId);
 
-        $cached = Cache::get($key);
-        if (is_array($cached)) {
-            return $cached;
-        }
-
-        $map = self::computeResolvedMap($professionalId);
-
         try {
-            Cache::put($key, $map, self::CACHE_TTL_SECONDS);
+            // Single-flight via CacheLockService — under fan-out (50+ workers
+            // hitting the same cold key) only one computes; the rest block on
+            // the lock and read the warmed value. Adds jitter + SWR semantics
+            // for free.
+            $value = app(CacheLockService::class)->rememberLocked(
+                $key,
+                self::CACHE_TTL_SECONDS,
+                fn () => self::computeResolvedMap($professionalId),
+            );
+
+            return is_array($value) ? $value : self::computeResolvedMap($professionalId);
         } catch (\Throwable $e) {
             // Cache outage must never break sends — fall back to uncached path.
             Log::warning('Notification preference cache write failed', [
                 'professional_id' => $professionalId,
                 'message' => $e->getMessage(),
             ]);
-        }
 
-        return $map;
+            return self::computeResolvedMap($professionalId);
+        }
     }
 
     /**
@@ -313,7 +318,11 @@ class NotificationPublisher
      */
     public static function forget(string $professionalId): void
     {
-        Cache::forget(self::cacheKey($professionalId));
+        // Pinned to redis — falling through to a file/array driver would make
+        // invalidation worker-local and silently leave other workers stale.
+        $key = self::cacheKey($professionalId);
+        self::store()->forget($key);
+        self::store()->forget($key.':stale');
     }
 
     /**
@@ -323,9 +332,11 @@ class NotificationPublisher
     public static function bumpGlobalVersion(): void
     {
         try {
-            // Seed if missing so increment() has an integer to work with.
-            Cache::add(self::GLOBAL_VERSION_KEY, 1, null);
-            Cache::increment(self::GLOBAL_VERSION_KEY);
+            // Pinned to redis — a file-driver fallback would make the bump
+            // worker-local; per-pro invalidation via the version key would
+            // silently break across the fleet.
+            self::store()->add(self::GLOBAL_VERSION_KEY, 1, null);
+            self::store()->increment(self::GLOBAL_VERSION_KEY);
         } catch (\Throwable $e) {
             Log::warning('Notification preference cache version bump failed', [
                 'message' => $e->getMessage(),
@@ -335,9 +346,26 @@ class NotificationPublisher
 
     private static function cacheKey(string $professionalId): string
     {
-        $version = (int) (Cache::get(self::GLOBAL_VERSION_KEY) ?? 1);
+        $version = (int) (self::store()->get(self::GLOBAL_VERSION_KEY) ?? 1);
 
         return "notif_pref:p:{$professionalId}:v{$version}";
+    }
+
+    /**
+     * Pin every cache touch in this service to redis explicitly. The app's
+     * caching architecture assumes a shared Redis store across all workers;
+     * relying on the default driver leaves us exposed to a misconfigured env
+     * (file/array) silently breaking cross-worker sharing and invalidation.
+     */
+    private static function store(): CacheRepository
+    {
+        // Tests use the configured default (array) — explicit pinning would
+        // require booting a redis store that the test harness doesn't provide.
+        if (app()->environment('testing')) {
+            return Cache::store();
+        }
+
+        return Cache::store('redis');
     }
 
     /**

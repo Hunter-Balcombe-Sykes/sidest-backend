@@ -165,8 +165,10 @@ class ExportCustomerDataJob implements ShouldQueue
 
         $leadSubmissions = [];
         if (! empty($customerIds)) {
+            // Drop ip_hash + user_agent — technical fingerprint, not user-visible.
             $leadSubmissions = DB::connection('pgsql')
                 ->table('analytics.lead_submissions')
+                ->select(['id', 'occurred_at', 'outcome', 'form_started_at_ms', 'customer_id', 'subdomain', 'site_id', 'referrer'])
                 ->whereIn('customer_id', $customerIds)
                 ->get()
                 ->map(fn ($r) => (array) $r)

@@ -176,11 +176,15 @@ class NotificationListingService
      */
     private function bustIndexCache(string $professionalId): void
     {
+        // Pinned to redis in non-test envs — a file/array driver fallback in
+        // prod would only clear the local worker's copy, leaving other workers
+        // serving the stale unread-count until the 15s TTL expires naturally.
+        $store = app()->environment('testing') ? Cache::store() : Cache::store('redis');
         foreach ([50, 100, 200] as $limit) {
             foreach ([false, true] as $includeDismissed) {
                 $key = $this->cacheKey($professionalId, $limit, $includeDismissed);
-                Cache::forget($key);
-                Cache::forget($key.':stale');
+                $store->forget($key);
+                $store->forget($key.':stale');
             }
         }
     }

@@ -11,7 +11,7 @@ it('has correct reliability properties', function () {
     expect($job->timeout)->toBe(30);
 });
 
-it('failed() reports the exception and logs enquiry context', function () {
+it('failed() reports the exception and logs enquiry context without leaking the notification email', function () {
     Log::spy();
 
     $job = new SendEnquiryNotificationJob('enquiry-uuid-123', 'notify@example.com');
@@ -22,9 +22,12 @@ it('failed() reports the exception and logs enquiry context', function () {
     Log::shouldHaveReceived('error')
         ->atLeast()->once()
         ->withArgs(function (string $message, array $context) {
+            // notification_email is intentionally omitted — log retention
+            // exceeds GDPR/Privacy Act scrubbing scope, and enquiry_id is
+            // sufficient to recover the email during incident response.
             return $message === 'SendEnquiryNotificationJob failed permanently'
                 && $context['enquiry_id'] === 'enquiry-uuid-123'
-                && $context['notification_email'] === 'notify@example.com'
+                && ! array_key_exists('notification_email', $context)
                 && str_contains($context['error'], 'mail transport failed');
         });
 });

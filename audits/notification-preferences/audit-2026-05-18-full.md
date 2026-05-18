@@ -268,7 +268,7 @@ Three key verification wins from the migration files:
 
 ## P2 — Should fix
 
-- [ ] **#DINT-1** · P2 — Data export ZIP leaks `unsubscribe_token`, `consent_ip_hash`, and `consent_user_agent` — raw DB query bypasses `EmailSubscription::$hidden`
+- [x] **#DINT-1** · P2 — Data export ZIP leaks `unsubscribe_token`, `consent_ip_hash`, and `consent_user_agent` — raw DB query bypasses `EmailSubscription::$hidden`
     - **Where:** app/Services/Professional/DataExport/DataExportPayloadBuilder.php (emailSubscriptions method)
     - **Affects:** Any professional who exports their account data. The ZIP's `data.json` contains every subscriber's unsubscribe token (usable to programmatically unsubscribe anyone) plus IP hash and user-agent (technical fingerprints that belong to the subscriber, not the professional).
     - **Effort:** S (~0.5–1h)
@@ -290,7 +290,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SEC-1** · P2 — `PublicEmailSubscriptionController` logs subscriber email address in plaintext on customer upsert failure
+- [x] **#SEC-1** · P2 — `PublicEmailSubscriptionController` logs subscriber email address in plaintext on customer upsert failure
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEmailSubscriptionController.php:88-93
     - **Affects:** End-user privacy — every customer email that triggers a upsert failure is written to the application log (Nightwatch / log aggregator), creating a persistent PII store outside the database with no equivalent GDPR scrubbing path.
     - **Effort:** S (~0.5–1h)
@@ -311,7 +311,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SEC-2** · P2 — Data export includes `ip_hash` and `user_agent` from `lead_submissions` — inconsistent with redaction applied to enquiries
+- [x] **#SEC-2** · P2 — Data export includes `ip_hash` and `user_agent` from `lead_submissions` — inconsistent with redaction applied to enquiries
     - **Where:** app/Services/Professional/DataExport/DataExportPayloadBuilder.php (bookings method, lead_submissions query)
     - **Affects:** Professionals receiving a data export get technical fingerprint metadata for lead submissions that is deliberately stripped from the parallel enquiries export.
     - **Effort:** S (~0.5–1h)
@@ -334,7 +334,7 @@ Three key verification wins from the migration files:
             ->all();
         ```
 
-- [ ] **#SEC-3** · P2 — `SendEnquiryNotificationJob::failed()` logs the professional's notification email — PII in the permanent error log
+- [x] **#SEC-3** · P2 — `SendEnquiryNotificationJob::failed()` logs the professional's notification email — PII in the permanent error log
     - **Where:** app/Jobs/Notifications/SendEnquiryNotificationJob.php:56-61
     - **Affects:** The professional's configured notification email is written to the log aggregator whenever the job exhausts all retries — a persistent record outside the database's data-retention and GDPR scrubbing scope.
     - **Effort:** S (~0.5–1h)
@@ -356,7 +356,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#LIFE-3** · P2 — `PublicCustomerLeadController` catches generic `QueryException` for unique-constraint detection
+- [x] **#LIFE-3** · P2 — `PublicCustomerLeadController` catches generic `QueryException` for unique-constraint detection
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicCustomerLeadController.php:184-188
     - **Affects:** Marketing subscription upserts during lead form submissions. Same fragility as LIFE-2 — a deadlock or connection drop could be silently swallowed as a "duplicate ignore."
     - **Effort:** S (~0.5–1h)
@@ -374,7 +374,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#LIFE-5** · P2 — `ContactCaptureService` swallows all exceptions without `report()` — Nightwatch is blind to contact-capture failures on the highest-throughput path
+- [x] **#LIFE-5** · P2 — `ContactCaptureService` swallows all exceptions without `report()` — Nightwatch is blind to contact-capture failures on the highest-throughput path
     - **Where:** app/Services/Customers/ContactCaptureService.php:101-108, 164-176
     - **Affects:** Every order webhook, booking, and lead that calls `captureContact()` or `captureMarketingSubscription()`. At peak load (~3K orders/day), a Postgres connectivity blip produces dozens of swallowed exceptions per minute with no Nightwatch visibility.
     - **Effort:** S (~0.5–1h)
@@ -402,7 +402,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#LIFE-6** · P2 — `InviteExpirySweepJob::failed()` has no tenant context — Nightwatch can't correlate a top-level crash to a brand
+- [x] **#LIFE-6** · P2 — `InviteExpirySweepJob::failed()` has no tenant context — Nightwatch can't correlate a top-level crash to a brand
     - **Where:** app/Jobs/Notifications/InviteExpirySweepJob.php:72-76
     - **Affects:** Operational visibility into the daily invite-expiry sweep. When the job fails before processing any chunk (e.g. DB connection timeout), the error log carries no brand or operation context.
     - **Effort:** S (~0.5–1h)
@@ -421,7 +421,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#CACHE-1** · P2 — `NotificationPublisher::loadResolvedMap` has no single-flight lock — stampede risk on cold cache during fan-out
+- [x] **#CACHE-1** · P2 — `NotificationPublisher::loadResolvedMap` has no single-flight lock — stampede risk on cold cache during fan-out
     - **Where:** app/Services/Notifications/NotificationPublisher.php:186-194
     - **Affects:** Email delivery path for all professionals. During fan-out events (brand status changes, weekly analytics) many workers can recompute the same preferences map simultaneously.
     - **Effort:** S (~0.5–1h)
@@ -443,7 +443,7 @@ Three key verification wins from the migration files:
         } catch (\Throwable $e) { … }
         ```
 
-- [ ] **#CACHE-2** · P2 — `NotificationPublisher` uses `Cache` facade without pinning to the Redis store — file-driver fallback would break cross-worker sharing
+- [x] **#CACHE-2** · P2 — `NotificationPublisher` uses `Cache` facade without pinning to the Redis store — file-driver fallback would break cross-worker sharing
     - **Where:** app/Services/Notifications/NotificationPublisher.php:186 (`Cache::get`), :194 (`Cache::put`), :205 (`Cache::forget`), :213-214 (`Cache::add`, `Cache::increment`)
     - **Affects:** Preferences cache for all notification email sends. Under a misconfigured or local-development environment where the default cache store is `file`, each Horizon worker maintains an independent local cache, defeating sharing and causing repeated DB queries.
     - **Effort:** S (~0.5–1h)
@@ -461,7 +461,7 @@ Three key verification wins from the migration files:
         Cache::increment(self::GLOBAL_VERSION_KEY);
         ```
 
-- [ ] **#CACHE-3** · P2 — `NotificationListingService::bustIndexCache` uses `Cache` facade without pinning to Redis — busting a file-cached key leaves other workers stale
+- [x] **#CACHE-3** · P2 — `NotificationListingService::bustIndexCache` uses `Cache` facade without pinning to Redis — busting a file-cached key leaves other workers stale
     - **Where:** app/Services/Notifications/NotificationListingService.php:136-139
     - **Affects:** The notification bell unread count and listing cache. After a user marks a notification as read, only the local worker's file-cached copy is deleted; other workers continue to serve the old unread count until TTL expiry.
     - **Effort:** S (~0.5–1h)

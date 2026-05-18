@@ -84,7 +84,14 @@ class InviteExpirySweepJob implements ShouldQueue
 
     public function failed(\Throwable $e): void
     {
+        // Sweep is brand-agnostic (iterates every pending invite) so there is no
+        // single tenant to attach — instead, attach the sweep date + job name so
+        // a Nightwatch alert can be cross-referenced against the database state
+        // at the moment of failure.
+        report($e);
         Log::error('Invite expiry sweep job failed', [
+            'job' => 'InviteExpirySweepJob',
+            'sweep_date' => now()->toDateString(),
             'message' => $e->getMessage(),
         ]);
     }

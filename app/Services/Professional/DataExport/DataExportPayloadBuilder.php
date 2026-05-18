@@ -176,8 +176,15 @@ class DataExportPayloadBuilder
 
     private function emailSubscriptions(string $professionalId): array
     {
+        // Explicit allow-list — `unsubscribe_token`, `consent_ip_hash`, and
+        // `consent_user_agent` are in EmailSubscription::$hidden because they
+        // are either credentials (token unsubscribes anyone) or technical
+        // fingerprints. DB::table() bypasses $hidden, so we re-state the
+        // allow-list here. Mirrors the column set returned by
+        // /api/email-subscribers.
         return DB::connection('pgsql')
             ->table('notifications.email_subscriptions')
+            ->select(['id', 'professional_id', 'list_key', 'email', 'full_name', 'status', 'subscribed_at', 'unsubscribed_at', 'consent_source', 'created_at'])
             ->where('professional_id', $professionalId)
             ->get()
             ->map(fn ($r) => (array) $r)
@@ -227,8 +234,11 @@ class DataExportPayloadBuilder
             ->map(fn ($r) => (array) $r)
             ->all();
 
+        // Mirror the redaction in enquiries() — drop ip_hash + user_agent
+        // (technical fingerprint, not user-visible lead data).
         $leads = DB::connection('pgsql')
             ->table('analytics.lead_submissions')
+            ->select(['id', 'occurred_at', 'outcome', 'form_started_at_ms', 'customer_id', 'subdomain', 'site_id', 'referrer'])
             ->where('professional_id', $professionalId)
             ->get()
             ->map(fn ($r) => (array) $r)

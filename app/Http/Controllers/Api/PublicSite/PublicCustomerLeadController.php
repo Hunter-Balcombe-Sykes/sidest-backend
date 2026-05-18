@@ -9,7 +9,7 @@ use App\Http\Requests\Api\PublicSite\CustomerLeads\PublicCustomerLeadRequest;
 use App\Models\Analytics\LeadSubmission;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Services\PublicSite\PublicSiteResolver;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -188,11 +188,9 @@ class PublicCustomerLeadController extends ApiController
             ]);
 
             $sub->save();
-        } catch (QueryException $e) {
-            // If a race creates the row first, just ignore.
-            if ($e->getCode() !== '23505') {
-                throw $e;
-            }
+        } catch (UniqueConstraintViolationException) {
+            // Race: another request inserted the same (professional_id, list_key, email_lc)
+            // row between our SELECT and INSERT. Idempotent — nothing more to do.
         }
     }
 }

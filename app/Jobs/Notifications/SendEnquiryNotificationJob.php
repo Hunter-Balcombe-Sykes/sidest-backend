@@ -68,9 +68,11 @@ class SendEnquiryNotificationJob implements ShouldQueue
     public function failed(\Throwable $e): void
     {
         report($e);
+        // Don't log the professional's notification_email — log retention exceeds
+        // GDPR/Privacy Act expectations; enquiry_id is sufficient to recover the
+        // email from the database during incident response.
         Log::error('SendEnquiryNotificationJob failed permanently', [
             'enquiry_id' => $this->enquiryId,
-            'notification_email' => $this->notificationEmail,
             'error' => $e->getMessage(),
         ]);
     }

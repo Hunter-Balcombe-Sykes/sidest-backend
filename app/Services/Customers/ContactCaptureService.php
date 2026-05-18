@@ -116,6 +116,10 @@ class ContactCaptureService
                 return $this->createCustomerRow($professionalId, $fullName, $email, null, $source, $externalId, $marketingOptIn);
             }
         } catch (Throwable $e) {
+            // Surface to Nightwatch — Log::warning is a breadcrumb, only report()
+            // triggers exception-based alerting. We still swallow the throw so
+            // contact capture failures never break the parent business flow.
+            report($e);
             Log::warning('Contact capture failed', [
                 'professional_id' => $professionalId,
                 'source' => $data['source'] ?? null,
@@ -226,12 +230,14 @@ class ContactCaptureService
             try {
                 $this->reconcileRacedSubscription($professionalId, $email, $fullName, $consent);
             } catch (Throwable $reconcileError) {
+                report($reconcileError);
                 Log::warning('Marketing subscription reconcile after race failed', [
                     'professional_id' => $professionalId,
                     'message' => $reconcileError->getMessage(),
                 ]);
             }
         } catch (Throwable $e) {
+            report($e);
             Log::warning('Marketing subscription capture failed', [
                 'professional_id' => $professionalId,
                 'message' => $e->getMessage(),

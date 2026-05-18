@@ -107,9 +107,12 @@ class PublicEmailSubscriptionController extends ApiController
             // Do not block successful subscription if customer sync fails — but DO
             // surface to Nightwatch so silent customer/list drift isn't invisible.
             report($exception);
+            // Hash the email — Nightwatch / log aggregator retention exceeds
+            // GDPR scrubbing scope; a hash preserves cross-reference ability
+            // without storing raw PII in the log.
             Log::warning('Public subscribe customer upsert failed', [
                 'professional_id' => (string) $site->professional_id,
-                'email' => $email,
+                'email_hash' => hash('sha256', $email),
                 'error' => $exception->getMessage(),
             ]);
         }
