@@ -437,6 +437,21 @@ class ProfessionalAnalyticsController extends ApiController
                     'revenue_cents' => $commerceCurrent['revenue_cents'],
                     'avg_order_cents' => $commerceCurrent['avg_order_cents'],
                     'avg_order_qty' => $commerceCurrent['avg_order_qty'],
+                    // Pre-calculated rates using standard industry formulas — frontend must not recompute these
+                    'conversion_rate_pct' => (function () use ($visitsAgg, $commerceCurrent): ?float {
+                        $uniqueVisitors = (int) ($visitsAgg->unique_visitors ?? 0);
+
+                        return $uniqueVisitors > 0
+                            ? round($commerceCurrent['orders'] / $uniqueVisitors * 100, 2)
+                            : null;
+                    })(),
+                    'abandoned_cart_rate_pct' => (function () use ($professional, $from, $to, $commerceCurrent): ?float {
+                        $sessions = $this->checkoutSessions($professional->id, $from, $to);
+
+                        return $sessions > 0
+                            ? round(max(0.0, min(100.0, ($sessions - $commerceCurrent['orders']) / $sessions * 100)), 2)
+                            : null;
+                    })(),
                 ],
                 // Equal-length prior window for change badges. All-time queries
                 // produce a prev-window that pre-dates the account's data — caller
@@ -466,6 +481,22 @@ class ProfessionalAnalyticsController extends ApiController
         });
 
         return $this->success($data);
+    }
+
+    /**
+     * COUNT DISTINCT session_id from checkout_start events for the given window.
+     * Used as the abandoned cart rate denominator — consistent with AnalyticsService.
+     */
+    private function checkoutSessions(string $professionalId, Carbon $from, Carbon $to): int
+    {
+        return (int) DB::table('analytics.cart_events')
+            ->where('professional_id', $professionalId)
+            ->where('event_type', 'checkout_start')
+            ->whereNotNull('session_id')
+            ->where('occurred_at', '>=', $from)
+            ->where('occurred_at', '<=', $to)
+            ->distinct()
+            ->count('session_id');
     }
 
     /**
