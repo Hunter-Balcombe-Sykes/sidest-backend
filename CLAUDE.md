@@ -160,7 +160,7 @@ Gate::policy(YourModel::class, YourPolicy::class);
 
 ### MFA / AAL2
 
-This codebase reads `aal` and `amr` from Supabase JWTs and exposes them as request attributes (set by `VerifySupabaseJwt`). Staff routes are gated by `require.aal2`. For user-facing routes that should require MFA later, add `$this->requiresFreshAal2()` to the relevant policy method. Full runbook: `docs/auth/mfa-foundation.md`.
+This codebase reads `aal` and `amr` from Supabase JWTs and exposes them as request attributes (set by `VerifySupabaseJwt`). Staff routes are gated by `require.aal2`. For user-facing routes that should require MFA later, add `$this->requiresFreshAal2()` to the relevant policy method. Reference docs: `docs/auth/mfa-foundation.md`. Operator runbook (rollout, brute-force testing, lockout support): `docs/auth/mfa-foundation-runbook.md`.
 
 ## Shopify Integration
 
