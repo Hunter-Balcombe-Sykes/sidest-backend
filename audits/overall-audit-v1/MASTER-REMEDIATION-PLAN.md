@@ -10,7 +10,7 @@
 - **167 unique findings** across 6 phases after cross-phase deduplication (168 within-phase unique − 1 cross-phase dup)
 - **Tier totals:** 4 P0 · 40 P1 · 97 P2 · 26 P3
 - **41 foundational patterns** close ~128 findings; **41 standalone fixes** cover the residual ~39 (a few standalone entries bundle 2-3 closely related findings)
-- **12 patterns shipped on origin/development as of 2026-05-14:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`), M20 (migration safety convention + CI guard). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
+- **14 patterns shipped on origin/development as of 2026-05-18:** M1 (`012285c`), M2 (merge `e5bddb3b` + follow-ups `af2a0928`/`07888024`), M3 (`7919465a`), M4 (`d4b03ee`), M5 (`260ec1d`), M6 (`a90e1e7`), M7 (`05a13f1`), M8 (pre-existing; all 6 steps confirmed shipped 2026-05-14), M9 (`1a040b27`), M10 (`6b335f4c`+`ae03598c`, merge `1e64e187`), M12 (`bf620b22` + `782907cf`/`ffc449c4`), M20 (migration safety convention + CI guard), M23 (`7b86d8e6`; CHECK sweep), M24 (`c550dd1d`; FK index sweep). **All 4 P0s now closed** — DATA-C1#DATA-1 by M1, SEC-A#1/SEC-F#2 + SEC-A#2/SEC-C#1 by M2, SEC-B#3/SEC-F#1 by M3. See Recommended Landing Order ✅ markers + Status Snapshot.
 - **Estimated remaining effort:** ~8–10 weeks of focused work (sum of per-phase estimates; minor savings from cross-phase dedup/absorption)
 - **P0 callouts:**
     - **DATA-C1#DATA-1** (Phase 6) — `stripe_connect_status` CHECK rejects `'disconnected'`; every Stripe disconnect raises 23514 on `core/professionals.go` → infinite webhook retries on pilot day one
@@ -237,11 +237,11 @@ The order below is the sequence in which to merge the bundled PRs. Severity domi
     - **Tier:** P1 (1 P1 + 3 P2) · **Effort:** ~2–3 days · **Closes:** 4 findings
     - **Why this slot:** placeholder/logo races involve transactions spanning external I/O; defer until observability work has surfaced any latent issues.
 
-23. **Master Pattern 23 — CHECK constraint sweep on enum columns** (Phase 6 Pattern 7)
+23. ✅ **Master Pattern 23 — CHECK constraint sweep on enum columns** (Phase 6 Pattern 7)
     - **Tier:** P2 · **Effort:** ~1 day · **Closes:** 8 findings (largest single block in the plan)
     - **Why this slot:** uses Master 20's `NOT VALID` + `VALIDATE CONSTRAINT` pattern; mechanical sweep.
 
-24. **Master Pattern 24 — FK index sweep** (Phase 6 Pattern 8)
+24. ✅ **Master Pattern 24 — FK index sweep** (Phase 6 Pattern 8)
     - **Tier:** P2 · **Effort:** ~1h · **Closes:** 3 findings
     - **Why this slot:** uses Master 20's `CREATE INDEX CONCURRENTLY` pattern; lands with the other DDL sweeps.
 
@@ -1788,12 +1788,12 @@ These are real concurrency bugs but require the most care: the placeholder/logo 
 
 ---
 
-## Master Pattern 23 — CHECK constraint sweep on enum-like columns
+## ✅ Master Pattern 23 — CHECK constraint sweep on enum-like columns
 
 **Original ID:** Phase 6 Pattern 7
 **Closes:** DATA-A2#DATA-3, DATA-A2#DATA-4 ≡ DATA-D#DATA-2, DATA-A2#DATA-8, DATA-A#DATA-4, DATA-A#DATA-5, DATA-A#DATA-8 ≡ DATA-B#DATA-7, DATA-D#DATA-3, DATA-C2b#DATA-3
 **Tier:** P2 (8 P2 + 1 P3 absorbed — largest single block in the plan) · **Effort:** ~1 day
-**Status:** Open
+**Status:** Done — 2026-05-18 (`7b86d8e6`; 9 CHECK constraints across 8 columns, NOT VALID + VALIDATE two-step, tests in `tests/Feature/Database/CheckConstraintsTest.php`)
 **Depends on:** Master Pattern 20 (uses NOT VALID + VALIDATE CONSTRAINT pattern)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1888,12 +1888,12 @@ Largest single block of findings (8 unique, after dedup) but lowest individual s
 
 ---
 
-## Master Pattern 24 — FK index sweep
+## ✅ Master Pattern 24 — FK index sweep
 
 **Original ID:** Phase 6 Pattern 8
 **Closes:** DATA-A2#DATA-1, DATA-A2#DATA-2, DATA-A#DATA-9 (index half — also addressed under Pattern 2)
 **Tier:** P2 (2 P2 · 1 P3) · **Effort:** ~1h
-**Status:** Open
+**Status:** Done — 2026-05-18 (`c550dd1d`; 3 indexes via `202605190000003_add_missing_fk_indexes.sql`, applied to Supabase dev; `IndexCoverageTest.php` added; Opus-reviewed)
 **Depends on:** Master Pattern 20 (uses `CREATE INDEX CONCURRENTLY` pattern)
 **Lane:** 2 — Sonnet execute · Opus review · Josh sign-off if P0
 
@@ -1909,22 +1909,9 @@ Postgres never auto-creates indexes on FK columns. When a referenced row is dele
 
 ### What to do
 
-- [ ] **Step 1 — Single migration with three `CREATE INDEX CONCURRENTLY` (Phase 4 Pattern 2 convention — outside any `BEGIN`/`COMMIT`).** Write `supabase/migrations/<timestamp>_add_missing_fk_indexes.sql`:
-    ```sql
-    -- No BEGIN; — CREATE INDEX CONCURRENTLY cannot run in a transaction.
-
-    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sites_theme_id
-        ON site.sites (theme_id) WHERE theme_id IS NOT NULL;
-
-    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_aps_brand_professional_id
-        ON commerce.affiliate_product_selections (brand_professional_id);
-
-    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_wcsa_topup_id
-        ON core.wallet_currency_switch_audit (topup_id) WHERE topup_id IS NOT NULL;
-    ```
-    Pattern 2's FK addition (Pattern 6 of this plan, for `wallet_currency_switch_audit.topup_id`) and this index can land in the same migration if the existing v2 baseline lookup pattern allows (verify `\d core.wallet_currency_switch_audit` shows the new FK column is otherwise constraint-free).
-- [ ] **Step 2 — Verify partial-index applicability.** The `sites.theme_id` index is partial because `site_default_theme` trigger ensures most sites have `theme_id` set, so the partial form stays compact. The `topup_id` partial covers the same nullability.
-- [ ] **Step 3 — Test coverage.** Not strictly necessary — indexes are silent perf — but a `tests/Feature/Database/IndexCoverageTest.php` sweep asserting every FK has a supporting index (via `information_schema.referential_constraints` joined to `pg_index`) catches the next missed addition.
+- [x] **Step 1 — Single migration with three `CREATE INDEX CONCURRENTLY` (Phase 4 Pattern 2 convention — outside any `BEGIN`/`COMMIT`).** Written as `supabase/migrations/202605190000003_add_missing_fk_indexes.sql`. Applied to Supabase dev via `execute_sql` (CLI pipeline mode blocks CONCURRENTLY; registered in `supabase_migrations.schema_migrations` manually). Includes recovery note for INVALID stub cleanup.
+- [x] **Step 2 — Verify partial-index applicability.** Confirmed: `theme_id` IS NULL (nullable), `topup_id` IS NULL (nullable), `brand_professional_id` NOT NULL. Partial predicates correct. Opus review confirmed all three predicates.
+- [x] **Step 3 — Test coverage.** `tests/Feature/Database/IndexCoverageTest.php` added — asserts each index exists via `pg_index.indisvalid` (catches INVALID stubs from cancelled CONCURRENTLY builds, matching `CheckConstraintsTest`'s `convalidated` rigour). SQLite-skipped.
 
 ### Plain English
 
