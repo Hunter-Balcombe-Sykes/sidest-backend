@@ -1707,7 +1707,7 @@ Three findings, one migration, three identical job structures. Bundling them kee
 **Original ID:** Phase 2 Pattern D
 **Closes:** LIFE-D#1, LIFE-D#10, LIFE-D#11, LIFE-A#1
 **Tier:** P1 (1 P1 · 3 P2) · **Effort:** ~2–3 days
-**Status:** Symptom-now-visible (LIFE-D#1 — PR #13 `9fedbcb` made listDesignMedia always return ready-state placeholders; orphan output is now user-observable)
+**Status:** ✅ Shipped 2026-05-18 — commits `b920d398..ed680421` on `development`. Two-pass Opus review (initial REQUEST CHANGES → APPROVE WITH NITS → addressed). `eligible_after` natural key bucketed to `((eligible_after AT TIME ZONE 'UTC')::date)` with `currency_code` added to the key, since microsecond-precise cutoffs would have made the original audit SQL dead defense. Worker-SIGKILL stuck-PROCESSING failure mode is documented inline as a separate cleanup story.
 **Depends on:** Master Pattern 20 (migration safety convention) — Step 1 adds a partial UNIQUE index
 **Lane:** 3 — Opus execute · Opus review · Josh sign-off required
 
@@ -1717,7 +1717,7 @@ The canonical concurrency pattern from commit `5735525` requires **both** applic
 
 ### What to do
 
-- [ ] **Step 1 — `commission_payouts` partial UNIQUE index (LIFE-A#1, P2).** Add a Supabase migration `<timestamp>_commission_payouts_natural_key_unique.sql`:
+- [x] **Step 1 — `commission_payouts` partial UNIQUE index (LIFE-A#1, P2).** Add a Supabase migration `<timestamp>_commission_payouts_natural_key_unique.sql`:
     ```sql
     CREATE UNIQUE INDEX commission_payouts_natural_key_uq
         ON commerce.commission_payouts (brand_professional_id, affiliate_professional_id, eligible_after)
@@ -1725,7 +1725,7 @@ The canonical concurrency pattern from commit `5735525` requires **both** applic
     ```
     In `CommissionPayoutService::createPayoutBatch`, wrap the `forceCreate` call in `try/catch (\Illuminate\Database\UniqueConstraintViolationException $e)` — log a warning and return `null` (treat as "created by a concurrent path"). This is the `UniqueConstraintViolationException` typed-catch pattern from `#STRIPE-3`.
     Note: post-`20260419000002_nullable_commission_fks.sql`, both FK columns are nullable; Postgres NULL-valued rows are excluded from unique index conflicts, so soft-deleted professional rows are safely excluded.
-- [ ] **Step 2 — `addPlaceholder` count-then-insert race (LIFE-D#1, P1 — SYMPTOM NOW VISIBLE).** `app/Services/Media/BrandDesignMediaService.php` — `addPlaceholder` method. Add `->lockForUpdate()` to the `$activeCount` query inside the existing transaction:
+- [x] **Step 2 — `addPlaceholder` count-then-insert race (LIFE-D#1, P1 — SYMPTOM NOW VISIBLE).** `app/Services/Media/BrandDesignMediaService.php` — `addPlaceholder` method. Add `->lockForUpdate()` to the `$activeCount` query inside the existing transaction:
     ```php
     $activeCount = SiteMedia::query()
         ->where('site_id', $site->id)
@@ -1742,7 +1742,7 @@ The canonical concurrency pattern from commit `5735525` requires **both** applic
     **Post-baseline note (2026-05-12):** PR #13 (`9fedbcb`) modified `listDesignMedia` to always return ready-state placeholders, including those whose `MediaVariant::getUrlAttribute()` returns `''` due to an unreachable disk. The race condition itself is unchanged — but any race-bypass orphan is now visible to brands as a 6th placeholder card with no thumbnail (where the bug previously silently hid the orphan). Land this `lockForUpdate` fix promptly to stop new visible orphans. Existing orphans (if any) need a separate one-off cleanup task — they are now logged via the `9fedbcb` Nightwatch warning on unresolvable URLs, so the cleanup script can be informed by Nightwatch query.
 
     **Safe-sequencing note:** `lockForUpdate` on a count query is a pure safety addition — zero behaviour change under single-user load, just serializes concurrent inserts. No risk of deadlock — `site_media` insert is a single-row operation, no outer transaction holding other rows.
-- [ ] **Step 3 — `ProcessVideoVariantsJob` in-flight lock (LIFE-D#10, P2).** `app/Jobs/ProcessVideoVariantsJob.php` — `handle()`. The existing terminal-state guard covers `READY` and `FAILED` but not `PROCESSING`. Add a Redis `SET NX` lock at the start of `handle()`, keyed on `media_id` (NOT job ID, so crash-then-retry can still acquire it via TTL expiry):
+- [x] **Step 3 — `ProcessVideoVariantsJob` in-flight lock (LIFE-D#10, P2).** `app/Jobs/ProcessVideoVariantsJob.php` — `handle()`. The existing terminal-state guard covers `READY` and `FAILED` but not `PROCESSING`. Add a Redis `SET NX` lock at the start of `handle()`, keyed on `media_id` (NOT job ID, so crash-then-retry can still acquire it via TTL expiry):
     ```php
     $lockKey = "video:processing-lock:{$this->mediaId}";
     $lock = Redis::set($lockKey, 1, 'EX', $this->encodingTimeout + 60, 'NX');
@@ -1757,7 +1757,7 @@ The canonical concurrency pattern from commit `5735525` requires **both** applic
     }
     ```
     Apply the same fix to `ProcessImageVariantsJob` (LIFE-D mentions it has the same gap but CPU cost is small; tag as optional follow-on, not required for the close).
-- [ ] **Step 4 — Logo upload row-then-file ordering (LIFE-D#11, P2).** `app/Services/Media/BrandDesignMediaService.php` — `upsertLogoFromUploadedFile`, `upsertLogoFromBytes`, `createDesignRow`. Reverse the ordering: **store the original file to R2 first**, using a deterministic path derived from a content hash; then call `createDesignRow` and singleton-replace within the transaction. The row commits with `path` already populated — eliminating the soft-delete-during-flight race where Row A's path-update silently no-ops because Row B's createDesignRow already soft-deleted it.
+- [x] **Step 4 — Logo upload row-then-file ordering (LIFE-D#11, P2).** `app/Services/Media/BrandDesignMediaService.php` — `upsertLogoFromUploadedFile`, `upsertLogoFromBytes`, `createDesignRow`. Reverse the ordering: **store the original file to R2 first**, using a deterministic path derived from a content hash; then call `createDesignRow` and singleton-replace within the transaction. The row commits with `path` already populated — eliminating the soft-delete-during-flight race where Row A's path-update silently no-ops because Row B's createDesignRow already soft-deleted it.
 
     Pseudocode:
     ```php
