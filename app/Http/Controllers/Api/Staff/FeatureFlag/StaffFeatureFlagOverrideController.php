@@ -8,7 +8,6 @@ use App\Http\Resources\FeatureFlagOverrideResource;
 use App\Models\Core\FeatureFlag;
 use App\Models\Core\FeatureFlagOverride;
 use App\Services\FeatureFlags\FeatureFlagService;
-use App\Services\FeatureFlags\OverrideScope;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -67,11 +66,14 @@ class StaffFeatureFlagOverrideController extends ApiController
 
         $override = FeatureFlagOverride::findOrFail($id);
 
-        $scope = $override->brand_id
-            ? OverrideScope::forBrand($override->brand_id)
-            : OverrideScope::forProfessional($override->professional_id);
+        // Delete by PK (unambiguous), then push-invalidate the scope's cache key.
+        $override->delete();
 
-        $this->service->clearOverride($override->flag_key, $scope);
+        if ($override->brand_id !== null) {
+            $this->service->forgetBrand($override->brand_id);
+        } else {
+            $this->service->forgetPro($override->professional_id);
+        }
 
         return response()->json(null, 204);
     }

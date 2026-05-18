@@ -37,12 +37,12 @@ use Throwable;
 class FeatureFlagService
 {
     private const BASE_TTL_SECONDS = 300;
+
     private const TTL_JITTER_SECONDS = 60;
+
     private const REGISTRY_KEY = 'ff:registry';
 
-    public function __construct(private CacheLockService $cacheLock)
-    {
-    }
+    public function __construct(private CacheLockService $cacheLock) {}
 
     public function enabled(string $key, ?Professional $pro = null, ?BrandProfile $brand = null): bool
     {
@@ -78,6 +78,7 @@ class FeatureFlagService
                 'brand_id' => $brand?->id,
                 'request_id' => request()?->header('X-Request-Id'),
             ]);
+
             // Degrade: load all data in 3 queries (registry + pro overrides + brand overrides)
             // then resolve from arrays without cache.
             return $this->allForFromDb($pro, $brand);
@@ -116,13 +117,26 @@ class FeatureFlagService
                 ['flag_key' => $key, 'brand_id' => $scope->brandId],
                 $attrs + ['brand_id' => $scope->brandId, 'professional_id' => null],
             );
-            $this->forgetBrand($scope->brandId);
         } else {
             FeatureFlagOverride::updateOrCreate(
                 ['flag_key' => $key, 'professional_id' => $scope->professionalId, 'brand_id' => null],
                 $attrs + ['professional_id' => $scope->professionalId, 'brand_id' => null],
             );
-            $this->forgetPro($scope->professionalId);
+        }
+
+        try {
+            if ($scope->brandId !== null) {
+                $this->forgetBrand($scope->brandId);
+            } else {
+                $this->forgetPro($scope->professionalId);
+            }
+        } catch (Throwable $e) {
+            Log::warning('feature_flags.invalidation_failed', [
+                'error' => $e->getMessage(),
+                'flag_key' => $key,
+                'scope_brand_id' => $scope->brandId,
+                'scope_professional_id' => $scope->professionalId,
+            ]);
         }
     }
 
@@ -136,10 +150,23 @@ class FeatureFlagService
 
         if ($scope->brandId !== null) {
             $query->where('brand_id', $scope->brandId)->delete();
-            $this->forgetBrand($scope->brandId);
         } else {
             $query->where('professional_id', $scope->professionalId)->whereNull('brand_id')->delete();
-            $this->forgetPro($scope->professionalId);
+        }
+
+        try {
+            if ($scope->brandId !== null) {
+                $this->forgetBrand($scope->brandId);
+            } else {
+                $this->forgetPro($scope->professionalId);
+            }
+        } catch (Throwable $e) {
+            Log::warning('feature_flags.invalidation_failed', [
+                'error' => $e->getMessage(),
+                'flag_key' => $key,
+                'scope_brand_id' => $scope->brandId,
+                'scope_professional_id' => $scope->professionalId,
+            ]);
         }
     }
 
@@ -147,7 +174,7 @@ class FeatureFlagService
     public function flushRegistry(): void
     {
         Cache::forget(self::REGISTRY_KEY);
-        Cache::forget(self::REGISTRY_KEY . ':stale');
+        Cache::forget(self::REGISTRY_KEY.':stale');
     }
 
     /** Flush all FF cache keys. Useful in tests and admin operations. */
@@ -210,7 +237,7 @@ class FeatureFlagService
         // 3. Percentage rollout — deterministic: same pro+key always lands in the same bucket.
         //    abs() guards against negative crc32 values on 64-bit PHP.
         if ($flag !== null && $pro !== null && $flag['rollout_percent'] > 0) {
-            if ((abs(crc32($key . $pro->id)) % 100) < $flag['rollout_percent']) {
+            if ((abs(crc32($key.$pro->id)) % 100) < $flag['rollout_percent']) {
                 return true;
             }
         }
@@ -221,7 +248,7 @@ class FeatureFlagService
         }
 
         // 5. Config fallback — used for flags that don't yet have a DB row.
-        return (bool) config('partna.features.' . $key, false);
+        return (bool) config('partna.features.'.$key, false);
     }
 
     private function jitteredTtl(): int
@@ -266,13 +293,19 @@ class FeatureFlagService
                     ->whereNull('brand_id')
                     ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()));
 
-                // Only apply the cross-schema soft-delete join on PostgreSQL — SQLite
+                // Only apply the cross-schema soft-delete joins on PostgreSQL — SQLite
                 // (used in tests) doesn't support schema-qualified table names.
                 if (DB::getDriverName() === 'pgsql') {
                     $query->whereExists(fn ($q) => $q->select(DB::raw(1))
                         ->from('core.professionals')
                         ->whereColumn('core.professionals.id', 'core.feature_flag_overrides.professional_id')
                         ->whereNull('core.professionals.deleted_at'));
+
+                    // Exclude overrides whose flag has been soft-deleted.
+                    $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                        ->from('core.feature_flags')
+                        ->whereColumn('core.feature_flags.key', 'core.feature_flag_overrides.flag_key')
+                        ->whereNull('core.feature_flags.deleted_at'));
                 }
 
                 return $query->get()
@@ -300,6 +333,12 @@ class FeatureFlagService
                         ->from('brand.brand_profiles')
                         ->whereColumn('brand.brand_profiles.id', 'core.feature_flag_overrides.brand_id')
                         ->whereNull('brand.brand_profiles.deleted_at'));
+
+                    // Exclude overrides whose flag has been soft-deleted.
+                    $query->whereExists(fn ($q) => $q->select(DB::raw(1))
+                        ->from('core.feature_flags')
+                        ->whereColumn('core.feature_flags.key', 'core.feature_flag_overrides.flag_key')
+                        ->whereNull('core.feature_flags.deleted_at'));
                 }
 
                 return $query->get()
