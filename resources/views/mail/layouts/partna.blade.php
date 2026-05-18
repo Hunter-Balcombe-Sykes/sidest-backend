@@ -63,11 +63,21 @@
 
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="container" style="width:600px; max-width:600px;">
 
-                    {{-- Header: logo --}}
+                    {{-- Header: icon + wordmark, side by side. Table layout
+                         because Outlook ignores inline-block on links. --}}
                     <tr>
                         <td class="px-gutter" align="left" style="padding: 8px 40px 40px 40px;">
                             <a href="https://app.partna.au" style="text-decoration:none;">
-                                <img src="https://app.partna.au/branding/icon.png" alt="Partna" width="36" height="36" style="display:block; width:36px; height:36px; border:0; outline:none;">
+                                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                    <tr>
+                                        <td valign="middle" style="line-height:0;">
+                                            <img src="https://app.partna.au/branding/Partna/email-icon.png" alt="" width="36" height="36" style="display:block; width:36px; height:36px; border:0; outline:none;">
+                                        </td>
+                                        <td valign="middle" style="line-height:0; padding-left:8px;">
+                                            <img src="https://app.partna.au/branding/Partna/email-wordmark.png" alt="Partna" width="137" height="36" style="display:block; width:137px; height:36px; border:0; outline:none;">
+                                        </td>
+                                    </tr>
+                                </table>
                             </a>
                         </td>
                     </tr>

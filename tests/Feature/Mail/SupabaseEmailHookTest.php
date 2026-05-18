@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Mail;
 
 beforeEach(function (): void {
     Mail::fake();
-    Config::set('services.supabase.anon_key', 'eyJ-test-anon-key');
+    Config::set('app.frontend_url', 'https://app.partna.au');
 });
 
 /**
@@ -70,10 +70,10 @@ it('dispatches PasswordResetMail for recovery action', function (): void {
     Mail::assertSent(PasswordResetMail::class, function (PasswordResetMail $m): bool {
         return $m->recipientEmail === 'tobias@partna.au'
             && $m->displayName === 'Tobias'
-            && str_contains($m->verifyUrl, '/auth/v1/verify')
-            && str_contains($m->verifyUrl, 'apikey=eyJ-test-anon-key')
-            && str_contains($m->verifyUrl, 'token=pkce_abc123')
-            && str_contains($m->verifyUrl, 'type=recovery');
+            && str_starts_with($m->verifyUrl, 'https://app.partna.au/auth/confirm?')
+            && str_contains($m->verifyUrl, 'token_hash=pkce_abc123')
+            && str_contains($m->verifyUrl, 'type=recovery')
+            && str_contains($m->verifyUrl, 'next=https%3A%2F%2Fapp.partna.au%2Fauth%2Fcallback');
     });
 });
 

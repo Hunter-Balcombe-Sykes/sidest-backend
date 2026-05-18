@@ -40,10 +40,9 @@ class SupabaseEmailHookController extends ApiController
         $recipientEmail = is_string($user['email'] ?? null) ? $user['email'] : null;
         $actionType = is_string($emailData['email_action_type'] ?? null) ? $emailData['email_action_type'] : null;
         $tokenHash = is_string($emailData['token_hash'] ?? null) ? $emailData['token_hash'] : null;
-        $siteUrl = is_string($emailData['site_url'] ?? null) ? rtrim($emailData['site_url'], '/') : null;
         $redirectTo = is_string($emailData['redirect_to'] ?? null) ? $emailData['redirect_to'] : null;
 
-        if (! $recipientEmail || ! $actionType || ! $tokenHash || ! $siteUrl) {
+        if (! $recipientEmail || ! $actionType || ! $tokenHash) {
             Log::warning('supabase.email_hook.payload_invalid', [
                 'has_user' => $user !== null,
                 'has_email_data' => $emailData !== null,
@@ -53,7 +52,7 @@ class SupabaseEmailHookController extends ApiController
             return $this->error('Invalid payload', 422);
         }
 
-        $verifyUrl = $this->buildVerifyUrl($siteUrl, $tokenHash, $actionType, $redirectTo);
+        $verifyUrl = $this->buildConfirmUrl($tokenHash, $actionType, $redirectTo);
         $displayName = $this->resolveDisplayName($user);
 
         try {
@@ -80,27 +79,25 @@ class SupabaseEmailHookController extends ApiController
     }
 
     /**
-     * Builds the Supabase verify endpoint URL. Clicking this hits
-     * `{site_url}/auth/v1/verify?apikey=...&token=...&type=...&redirect_to=...`,
-     * which exchanges the token, establishes a session, and 302s to redirect_to.
-     *
-     * The `apikey` param is the public anon key — Supabase's verify endpoint
-     * rejects the request with a "No API key found in request" error without it.
-     * The anon key is already public (it ships in the frontend bundle), so
-     * embedding it in the email link is safe.
+     * Builds a link to our own /auth/confirm page. We never expose Supabase's
+     * /auth/v1/verify endpoint to end users — /auth/confirm calls verifyOtp
+     * client-side, then routes the user to the right destination based on the
+     * email action type (recovery → reset-password form, signup → overview,
+     * invite → sign-up completion).
      */
-    private function buildVerifyUrl(string $siteUrl, string $tokenHash, string $actionType, ?string $redirectTo): string
+    private function buildConfirmUrl(string $tokenHash, string $actionType, ?string $redirectTo): string
     {
+        $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+
         $params = [
-            'apikey' => (string) config('services.supabase.anon_key', ''),
-            'token' => $tokenHash,
+            'token_hash' => $tokenHash,
             'type' => $actionType,
         ];
         if ($redirectTo !== null && $redirectTo !== '') {
-            $params['redirect_to'] = $redirectTo;
+            $params['next'] = $redirectTo;
         }
 
-        return $siteUrl.'/auth/v1/verify?'.http_build_query($params);
+        return $frontendUrl.'/auth/confirm?'.http_build_query($params);
     }
 
     /**
