@@ -111,7 +111,12 @@ require __DIR__.'/api/professional.php';
 require __DIR__.'/api/staff.php';
 require __DIR__.'/api/publicSite.php';
 
-Route::get('/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::class, 'unsubscribe'])
+// GET preserves the existing email-footer link behavior; POST satisfies
+// RFC 8058 one-click unsubscribe (List-Unsubscribe-Post: List-Unsubscribe=One-Click),
+// required by Gmail/Yahoo bulk-sender rules for marketing mail since Feb 2024.
+// The endpoint is intentionally CSRF-exempt because mailbox providers POST it
+// directly; it is idempotent and rate-limited via throttle:public-site.
+Route::match(['get', 'post'], '/public/unsubscribe/{token}', [PublicEmailUnsubscribeController::class, 'unsubscribe'])
     ->where('token', '[A-Za-z0-9]+')
     ->middleware('throttle:public-site')
     ->name('public.unsubscribe');

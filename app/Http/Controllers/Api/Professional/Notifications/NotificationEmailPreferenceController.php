@@ -40,8 +40,13 @@ class NotificationEmailPreferenceController extends ApiController
             $globalMode = $globalPolicies->get($category)?->mode;
             $prefRow = $prefs->get($category);
             $prefValue = $prefRow !== null ? (bool) $prefRow->enabled : null;
+            $mandatory = NotificationPublisher::isMandatory($category);
 
-            if ($perProMode === 'force_on') {
+            // Mandatory categories short-circuit every rung. They ship regardless
+            // of policy or preference and the toggle is non-editable in the UI.
+            if ($mandatory) {
+                $effective = true;
+            } elseif ($perProMode === 'force_on') {
                 $effective = true;
             } elseif ($perProMode === 'force_off') {
                 $effective = false;
@@ -59,7 +64,9 @@ class NotificationEmailPreferenceController extends ApiController
                 'category' => $category,
                 'enabled' => $effective,
                 'preference_set' => $prefValue !== null,
-                'overridden_by_policy' => in_array($perProMode, ['force_on', 'force_off'], true)
+                'mandatory' => $mandatory,
+                'overridden_by_policy' => $mandatory
+                    || in_array($perProMode, ['force_on', 'force_off'], true)
                     || in_array($globalMode, ['force_on', 'force_off'], true),
             ];
         }, NotificationPublisher::categories());

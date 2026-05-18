@@ -969,10 +969,10 @@ return [
         'analytics_weekly' => 30,
         'analytics_milestones' => 90,
         'profile_task' => 180,
-        'catalog_change' => 60,
         'brand_status' => 60,
         'subscription' => 365,
         'brand_link' => 60,
+        'payout_warning' => 60,
     ],
 
     'notifications' => [
@@ -997,10 +997,26 @@ return [
             'analytics_weekly' => \App\Mail\Notifications\AnalyticsWeeklyMail::class,
             'analytics_milestones' => \App\Mail\Notifications\AnalyticsMilestoneMail::class,
             'profile_tasks' => \App\Mail\Notifications\ProfileTaskMail::class,
-            'catalog_changes' => \App\Mail\Notifications\CatalogChangeMail::class,
             'brand_status' => \App\Mail\Notifications\BrandStatusMail::class,
             'subscriptions' => \App\Mail\Notifications\SubscriptionMail::class,
             'brand_links' => \App\Mail\Notifications\BrandLinkMail::class,
+            'payout_warnings' => \App\Mail\Notifications\PayoutWarningMail::class,
+        ],
+
+        /*
+         * Mandatory categories — money-movement and account-state notices that
+         * cannot be silenced by user preference. Legal basis: GDPR Art. 6(1)(b)
+         * (contract performance — the user needs to know payouts moved or their
+         * subscription changed), and CAN-SPAM §316.3 carves transactional
+         * "primary purpose" mail out of opt-out requirements. The preference
+         * controller surfaces these with mandatory=true so the frontend can
+         * render them as read-only "always on" toggles.
+         */
+        'mandatory_categories' => [
+            'commissions',
+            'payouts',
+            'subscriptions',
+            'brand_status',
         ],
     ],
 

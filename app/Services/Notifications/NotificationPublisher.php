@@ -191,8 +191,33 @@ class NotificationPublisher
         }
     }
 
+    /**
+     * Mandatory categories — see config('partna.notifications.mandatory_categories').
+     * Whether a category is mandatory wins over every other rung in the
+     * resolution chain (per-pro policy, global policy, user preference). The
+     * controller surfaces this so the frontend renders these toggles disabled.
+     *
+     * @return array<int, string>
+     */
+    public static function mandatoryCategories(): array
+    {
+        return (array) config('partna.notifications.mandatory_categories', []);
+    }
+
+    public static function isMandatory(string $category): bool
+    {
+        return in_array($category, self::mandatoryCategories(), true);
+    }
+
     public static function resolveEmailEnabled(string $professionalId, string $category): bool
     {
+        // Mandatory categories are exempt from every other rung — they ship
+        // even if staff or the user attempted to disable them. Surfaces in
+        // the preference controller as overridden_by_policy + mandatory.
+        if (self::isMandatory($category)) {
+            return true;
+        }
+
         // Per-professional policy
         $perProMode = DB::table('core.notification_email_policies')
             ->where('professional_id', $professionalId)

@@ -17,7 +17,7 @@ class DataExportPayloadBuilder
     /**
      * Build the full payload for a single professional.
      *
-     * @return array{metadata: array, profile: array, site: array, media: array, integrations: array, customers: array, services: array, service_categories: array, enquiries: array, email_subscriptions: array, bookings: array, billing: array, audit: array}
+     * @return array{metadata: array, profile: array, site: array, media: array, integrations: array, customers: array, services: array, service_categories: array, enquiries: array, email_subscriptions: array, notification_preferences: array, bookings: array, billing: array, audit: array}
      */
     public function build(string $professionalId): array
     {
@@ -37,6 +37,7 @@ class DataExportPayloadBuilder
             'service_categories' => $this->serviceCategories($professionalId),
             'enquiries' => $this->enquiries($professionalId),
             'email_subscriptions' => $this->emailSubscriptions($professionalId),
+            'notification_preferences' => $this->notificationPreferences($professionalId),
             'bookings' => $this->bookings($professionalId),
             'billing' => $this->billing($professionalId),
             'audit' => $this->audit($professionalId),
@@ -181,6 +182,36 @@ class DataExportPayloadBuilder
             ->get()
             ->map(fn ($r) => (array) $r)
             ->all();
+    }
+
+    /**
+     * Per-category email opt-in/out preferences plus any staff-issued policy
+     * overrides scoped to this professional. Required for GDPR Article 15
+     * (right of access) — users must be able to see every preference we store
+     * about them, not just the marketing subscription list.
+     */
+    private function notificationPreferences(string $professionalId): array
+    {
+        $preferences = DB::connection('pgsql')
+            ->table('notifications.notification_email_preferences')
+            ->where('professional_id', $professionalId)
+            ->get()
+            ->map(fn ($r) => (array) $r)
+            ->all();
+
+        // Per-professional policy overrides only — global policies apply to
+        // every user and are not personal data.
+        $policies = DB::connection('pgsql')
+            ->table('core.notification_email_policies')
+            ->where('professional_id', $professionalId)
+            ->get()
+            ->map(fn ($r) => (array) $r)
+            ->all();
+
+        return [
+            'category_preferences' => $preferences,
+            'staff_policy_overrides' => $policies,
+        ];
     }
 
     private function bookings(string $professionalId): array
