@@ -1449,12 +1449,12 @@ DB-D#SCALE-1 is a P1 silent data bug currently shipping logo-less brand installs
 
 ---
 
-## Master Pattern 18 — N+1 / lazy-load defence sweep
+## ✅ Master Pattern 18 — N+1 / lazy-load defence sweep
 
 **Original ID:** Phase 4 Pattern 5
 **Closes:** DB-F#SCALE-2, DB-A#SCALE-2, DB-A#SCALE-3
 **Tier:** P1 (1 P1 · 2 P3) · **Effort:** ~0.5 day
-**Status:** Open
+**Status:** ✅ Shipped — commits `090e312e` + `41c21952` on `development` (2026-05-18)
 **Depends on:** none
 **Lane:** 1 — Sonnet execute · Sonnet review (tests + Pint gate)
 
