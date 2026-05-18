@@ -65,7 +65,7 @@ Route::get('/plans', [PlanController::class, 'index'])
     ->middleware('throttle:plans');
 
 // Authorised Professional Logged In
-Route::middleware(['supabase.jwt', 'current.pro', EnforcePendingDeletionReadOnly::class, 'throttle:authenticated'])
+Route::middleware(['supabase.jwt', 'require.email_verified', 'current.pro', EnforcePendingDeletionReadOnly::class, 'throttle:authenticated'])
     ->group(function () {
 
         // Show & Edit Details

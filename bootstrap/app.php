@@ -5,6 +5,7 @@ use App\Http\Middleware\AddPublicCacheHeaders;
 use App\Http\Middleware\Auth\EnsurePartnaAdmin;
 use App\Http\Middleware\Auth\EnsurePartnaStaff;
 use App\Http\Middleware\Auth\VerifyHydrogenApiKey;
+use App\Http\Middleware\Auth\RequireEmailVerified;
 use App\Http\Middleware\Auth\VerifyShopifySessionToken;
 use App\Http\Middleware\Auth\VerifySupabaseEmailHookSignature;
 use App\Http\Middleware\Auth\VerifySupabaseJwt;
@@ -80,6 +81,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'supabase.jwt' => VerifySupabaseJwt::class,
+            'require.email_verified' => RequireEmailVerified::class,
             'current.pro' => LoadCurrentProfessional::class,
             'staff' => EnsurePartnaStaff::class,
             'staff.admin' => EnsurePartnaAdmin::class,

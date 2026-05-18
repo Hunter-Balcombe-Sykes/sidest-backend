@@ -50,6 +50,11 @@ function actingAsStaffWithUid(string $supabaseUid): \Pest\Support\HigherOrderTap
             public function handle(\Illuminate\Http\Request $request, \Closure $next)
             {
                 $request->attributes->set('supabase_uid', $this->uid);
+                $request->attributes->set('supabase_claims', [
+                    'sub' => $this->uid,
+                    'email' => 'staff-test@partna.au',
+                    'email_verified' => true,
+                ]);
 
                 return $next($request);
             }
