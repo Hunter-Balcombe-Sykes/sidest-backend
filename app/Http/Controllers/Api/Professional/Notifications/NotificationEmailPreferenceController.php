@@ -25,12 +25,12 @@ class NotificationEmailPreferenceController extends ApiController
             ->get(['category_key', 'enabled'])
             ->keyBy('category_key');
 
-        $perProPolicies = DB::table('core.notification_email_policies')
+        $perProPolicies = DB::table('notifications.notification_email_policies')
             ->where('professional_id', $pro->id)
             ->get(['category_key', 'mode'])
             ->keyBy('category_key');
 
-        $globalPolicies = DB::table('core.notification_email_policies')
+        $globalPolicies = DB::table('notifications.notification_email_policies')
             ->whereNull('professional_id')
             ->get(['category_key', 'mode'])
             ->keyBy('category_key');
