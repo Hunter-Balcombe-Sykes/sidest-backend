@@ -123,6 +123,8 @@ COMMIT;
 
 COMMENT ON TABLE core.staff_audit_log IS
     'OPS-2: append-only audit log of staff writes. One row per POST/PATCH/PUT/DELETE under /staff/*.';
+COMMENT ON COLUMN core.staff_audit_log.route IS
+    'Laravel route name (e.g., staff.professionals.update) if the route is named, or the URI template (e.g., api/staff/professionals/{professional}) if not. Staff routes are currently unnamed, so the URI template is stored. Forensic queries: route LIKE ''api/staff/%''.';
 COMMENT ON COLUMN core.staff_audit_log.payload_summary IS
     'Route bindings only by default (e.g., {"professional":"<uuid>"}). Body detail is opt-in per controller via StaffAuditService::record().';
 COMMENT ON COLUMN core.staff_audit_log.impersonator_staff_id IS

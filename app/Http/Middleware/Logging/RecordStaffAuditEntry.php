@@ -58,7 +58,7 @@ class RecordStaffAuditEntry
                 staff: $staff,
                 impersonator: null,
                 professional: $professional,
-                route: $request->route()?->getName() ?? ($request->route()?->uri() ?? $request->path()),
+                route: $request->route()?->getName() ?? $request->route()?->uri() ?? $request->path() ?: 'unknown',
                 httpMethod: $request->method(),
                 statusCode: $response->getStatusCode(),
                 payloadSummary: $this->summariseBindings($request, $professionalIdFromString),

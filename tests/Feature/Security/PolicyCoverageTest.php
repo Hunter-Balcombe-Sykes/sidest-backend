@@ -40,6 +40,12 @@ const POLICY_EXEMPT = [
     // Nested under Commerce\Order — append-only audit log; access flows through
     // the parent Order's CommissionPolicy. Mirrors the CommissionPayoutItem pattern.
     \App\Models\Commerce\OrderEvent::class,
+
+    // OPS-2: Append-only staff audit log. Never exposed over the API — support
+    // queries via SQL only. No tenant ownership; staff actor and target professional
+    // are FK metadata, not authorization keys. A Policy class would be meaningless
+    // here because there is no controller action to gate.
+    \App\Models\Core\Staff\StaffAuditEntry::class,
 ];
 
 it('every tenant-owned model has a registered policy', function () {
