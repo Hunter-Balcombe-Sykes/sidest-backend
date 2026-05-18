@@ -4,7 +4,9 @@ namespace App\Services\Notifications;
 
 use App\Jobs\Notifications\SendTransactionalNotificationEmailJob;
 use App\Models\Core\Notifications\Notification;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 // V2: Core notification engine. Publishes with atomic dedup via dedupe_key column,
@@ -209,51 +211,168 @@ class NotificationPublisher
         return in_array($category, self::mandatoryCategories(), true);
     }
 
+    /**
+     * Cache TTL for the per-professional resolved-preferences map. Long enough
+     * to absorb the burst pattern of fan-out sends; short enough that a missed
+     * invalidation self-heals within an hour.
+     */
+    private const CACHE_TTL_SECONDS = 3600;
+
+    private const GLOBAL_VERSION_KEY = 'notif_pref:global_v';
+
     public static function resolveEmailEnabled(string $professionalId, string $category): bool
     {
-        // Mandatory categories are exempt from every other rung — they ship
-        // even if staff or the user attempted to disable them. Surfaces in
-        // the preference controller as overridden_by_policy + mandatory.
+        // Mandatory check stays at the top — config-driven, no DB or cache hit.
         if (self::isMandatory($category)) {
             return true;
         }
 
-        // Per-professional policy
-        $perProMode = DB::table('core.notification_email_policies')
+        $map = self::loadResolvedMap($professionalId);
+
+        // Categories registered after the cache was warmed will be missing
+        // from the map. Refresh-and-retry rather than blindly returning the
+        // default so a new category lights up immediately.
+        if (! array_key_exists($category, $map)) {
+            self::forget($professionalId);
+            $map = self::loadResolvedMap($professionalId);
+        }
+
+        return $map[$category] ?? true;
+    }
+
+    /**
+     * Per-professional {category → bool} map. Cache-first; on miss, computes
+     * every category in three batched queries (per-pro policies, global
+     * policies, user prefs) — same query count as a single uncached
+     * resolveEmailEnabled() call, amortized across the whole registry.
+     *
+     * @return array<string, bool>
+     */
+    public static function loadResolvedMap(string $professionalId): array
+    {
+        $key = self::cacheKey($professionalId);
+
+        $cached = Cache::get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        $map = self::computeResolvedMap($professionalId);
+
+        try {
+            Cache::put($key, $map, self::CACHE_TTL_SECONDS);
+        } catch (\Throwable $e) {
+            // Cache outage must never break sends — fall back to uncached path.
+            Log::warning('Notification preference cache write failed', [
+                'professional_id' => $professionalId,
+                'message' => $e->getMessage(),
+            ]);
+        }
+
+        return $map;
+    }
+
+    /**
+     * Invalidate a single professional's preference cache. Called by both the
+     * user PATCH endpoint and the staff per-professional policy writer.
+     */
+    public static function forget(string $professionalId): void
+    {
+        Cache::forget(self::cacheKey($professionalId));
+    }
+
+    /**
+     * Bump the global cache version, atomically invalidating every per-pro
+     * entry without enumerating them. Called when staff edits a global policy.
+     */
+    public static function bumpGlobalVersion(): void
+    {
+        try {
+            // Seed if missing so increment() has an integer to work with.
+            Cache::add(self::GLOBAL_VERSION_KEY, 1, null);
+            Cache::increment(self::GLOBAL_VERSION_KEY);
+        } catch (\Throwable $e) {
+            Log::warning('Notification preference cache version bump failed', [
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private static function cacheKey(string $professionalId): string
+    {
+        $version = (int) (Cache::get(self::GLOBAL_VERSION_KEY) ?? 1);
+
+        return "notif_pref:p:{$professionalId}:v{$version}";
+    }
+
+    /**
+     * Three batched lookups → resolved bool per category. Mirrors the
+     * precedence chain in resolveEmailEnabled's prior implementation:
+     * mandatory > per-pro policy > global policy > user pref > default.
+     *
+     * @return array<string, bool>
+     */
+    private static function computeResolvedMap(string $professionalId): array
+    {
+        $categories = self::categories();
+        $mandatory = self::mandatoryCategories();
+
+        $perProPolicies = DB::table('core.notification_email_policies')
             ->where('professional_id', $professionalId)
-            ->where('category_key', $category)
-            ->value('mode');
+            ->pluck('mode', 'category_key')
+            ->all();
 
-        if ($perProMode === 'force_on') {
-            return true;
-        }
-        if ($perProMode === 'force_off') {
-            return false;
-        }
-
-        // Global policy
-        $globalMode = DB::table('core.notification_email_policies')
+        $globalPolicies = DB::table('core.notification_email_policies')
             ->whereNull('professional_id')
-            ->where('category_key', $category)
-            ->value('mode');
+            ->pluck('mode', 'category_key')
+            ->all();
 
-        if ($globalMode === 'force_on') {
-            return true;
-        }
-        if ($globalMode === 'force_off') {
-            return false;
-        }
-
-        // Professional preference
-        $preference = DB::table('notifications.notification_email_preferences')
+        $prefs = DB::table('notifications.notification_email_preferences')
             ->where('professional_id', $professionalId)
-            ->where('category_key', $category)
-            ->value('enabled');
+            ->pluck('enabled', 'category_key')
+            ->all();
 
-        if ($preference !== null) {
-            return (bool) $preference;
+        $map = [];
+        foreach ($categories as $category) {
+            if (in_array($category, $mandatory, true)) {
+                $map[$category] = true;
+
+                continue;
+            }
+
+            $perPro = $perProPolicies[$category] ?? null;
+            if ($perPro === 'force_on') {
+                $map[$category] = true;
+
+                continue;
+            }
+            if ($perPro === 'force_off') {
+                $map[$category] = false;
+
+                continue;
+            }
+
+            $global = $globalPolicies[$category] ?? null;
+            if ($global === 'force_on') {
+                $map[$category] = true;
+
+                continue;
+            }
+            if ($global === 'force_off') {
+                $map[$category] = false;
+
+                continue;
+            }
+
+            if (array_key_exists($category, $prefs)) {
+                $map[$category] = (bool) $prefs[$category];
+
+                continue;
+            }
+
+            $map[$category] = true; // default enabled
         }
 
-        return true; // default enabled
+        return $map;
     }
 }

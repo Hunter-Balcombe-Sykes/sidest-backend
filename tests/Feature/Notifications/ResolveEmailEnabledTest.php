@@ -3,6 +3,7 @@
 /** @phpstan-ignore-all */
 
 use App\Services\Notifications\NotificationPublisher;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 
@@ -52,6 +53,17 @@ beforeEach(function () {
 
     // Default mandatory categories — individual tests override as needed.
     Config::set('partna.notifications.mandatory_categories', ['payouts']);
+
+    // Cache: tests run on the array driver. Flush so a previous test's
+    // resolved-map cache can't leak into this one's expectations.
+    Cache::flush();
+
+    // The cache loader iterates self::categories(), so the registry must be
+    // non-empty for the map to contain anything. Pin a small fixture set.
+    Config::set('partna.notifications.mailables', [
+        'invites' => 'StubMail',
+        'payouts' => 'StubMail',
+    ]);
 });
 
 function insertPolicy(?string $proId, string $category, string $mode): void
@@ -131,4 +143,63 @@ it('exposes the mandatory list via the static helpers', function () {
     expect(NotificationPublisher::isMandatory('payouts'))->toBeTrue();
     expect(NotificationPublisher::isMandatory('invites'))->toBeFalse();
     expect(NotificationPublisher::mandatoryCategories())->toEqual(['payouts', 'subscriptions']);
+});
+
+// --- Cache layer -----------------------------------------------------------
+
+it('caches the resolved map after the first lookup', function () {
+    insertPreference('pro-1', 'invites', false);
+
+    expect(NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'))->toBeFalse();
+
+    // Mutate the underlying row directly — the cached map should mask it.
+    DB::table('notifications.notification_email_preferences')
+        ->where('professional_id', 'pro-1')
+        ->update(['enabled' => 1]);
+
+    expect(NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'))->toBeFalse();
+});
+
+it('forget() drops the per-pro cache so the next read recomputes', function () {
+    insertPreference('pro-1', 'invites', false);
+    NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'); // prime cache
+
+    DB::table('notifications.notification_email_preferences')
+        ->where('professional_id', 'pro-1')
+        ->update(['enabled' => 1]);
+
+    NotificationPublisher::forget('pro-1');
+
+    expect(NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'))->toBeTrue();
+});
+
+it('bumpGlobalVersion() invalidates every per-pro cache entry', function () {
+    insertPreference('pro-1', 'invites', true);
+    insertPreference('pro-2', 'invites', true);
+    NotificationPublisher::resolveEmailEnabled('pro-1', 'invites');
+    NotificationPublisher::resolveEmailEnabled('pro-2', 'invites');
+
+    // Simulate a staff global-policy change post-cache-warm.
+    insertPolicy(null, 'invites', 'force_off');
+    NotificationPublisher::bumpGlobalVersion();
+
+    expect(NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'))->toBeFalse();
+    expect(NotificationPublisher::resolveEmailEnabled('pro-2', 'invites'))->toBeFalse();
+});
+
+it('falls back to a fresh compute when a newly-registered category is missing from the cached map', function () {
+    insertPreference('pro-1', 'invites', false);
+    NotificationPublisher::resolveEmailEnabled('pro-1', 'invites'); // warm with the initial registry
+
+    // Register a new category after the cache was populated. The first lookup
+    // for the new category must self-heal (forget + re-load) instead of
+    // returning the default with no DB check.
+    Config::set('partna.notifications.mailables', [
+        'invites' => 'StubMail',
+        'payouts' => 'StubMail',
+        'brand_links' => 'StubMail',
+    ]);
+    insertPreference('pro-1', 'brand_links', false);
+
+    expect(NotificationPublisher::resolveEmailEnabled('pro-1', 'brand_links'))->toBeFalse();
 });

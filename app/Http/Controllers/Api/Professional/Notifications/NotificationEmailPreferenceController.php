@@ -89,6 +89,9 @@ class NotificationEmailPreferenceController extends ApiController
             );
         }
 
+        // Bust the per-professional cache so the next send sees the new pref.
+        NotificationPublisher::forget($pro->id);
+
         return $this->success(['ok' => true]);
     }
 }

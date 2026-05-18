@@ -40,6 +40,10 @@ class StaffNotificationEmailPolicyController extends ApiController
             );
         }
 
+        // Global policy affects every professional — bump the cache version
+        // so every per-pro entry naturally invalidates on next lookup.
+        NotificationPublisher::bumpGlobalVersion();
+
         return $this->success(['ok' => true]);
     }
 
@@ -76,6 +80,9 @@ class StaffNotificationEmailPolicyController extends ApiController
                 );
             }
         }
+
+        // Targeted invalidation — only this professional's cache needs to drop.
+        NotificationPublisher::forget($professional->id);
 
         return $this->success(['ok' => true]);
     }
