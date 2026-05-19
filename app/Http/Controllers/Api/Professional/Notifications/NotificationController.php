@@ -22,6 +22,14 @@ class NotificationController extends ApiController
      * GET /me/notifications
      * Returns notifications targeted to the current pro + broadcasts.
      * Read/dismiss state is stored per-user in notifications.notification_receipts.
+     *
+     * Pagination divergence (#API-2): this endpoint uses `?limit=` +
+     * `has_more` instead of the project-standard `paginate()` shape. The
+     * dashboard bell polls every few seconds and always renders from the top
+     * of the list — total-page metadata adds no value for that UI, and
+     * recomputing COUNT(*) on every poll is wasted DB work. Clients that
+     * need to scroll past the first page should bump `?limit=`; deep paging
+     * is not a supported flow for in-app notifications.
      */
     public function index(Request $request): JsonResponse
     {

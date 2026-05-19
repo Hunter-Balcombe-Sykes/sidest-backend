@@ -978,6 +978,17 @@ return [
     'notifications' => [
         'email_enabled' => (bool) env('PARTNA_NOTIFICATIONS_EMAIL_ENABLED', env('NOTIFICATIONS_EMAIL_ENABLED', false)),
 
+        // Max jobs per Bus::batch() sub-chunk for fan-out paths. Bounds the
+        // size of a single Redis pipeline write so a large affiliate / staff
+        // broadcast list can't spike Redis memory. Shared between
+        // FanOutBrandStatusNotificationJob and SendStaffBroadcastEmailsJob.
+        'batch_chunk_size' => (int) env('PARTNA_NOTIFICATIONS_BATCH_CHUNK_SIZE', 200),
+
+        // TTL (seconds) for the cached /me/notifications index payload.
+        // Short enough that a publish surfaces within one bell-poll cycle;
+        // markRead/dismiss bust the key explicitly so this is just a ceiling.
+        'listing_cache_ttl_seconds' => (int) env('PARTNA_NOTIFICATIONS_LISTING_CACHE_TTL', 15),
+
         /*
          * Category registry — single source of truth.
          *

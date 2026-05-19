@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ApiController;
 use App\Http\Controllers\Concerns\HandlesSearchQueries;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
+use App\Http\Resources\StaffEmailSubscriptionResource;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Http\JsonResponse;
@@ -58,6 +59,9 @@ class StaffEmailSubscriberController extends ApiController
         }
 
         $page = $query->paginate($perPage)->appends($request->query());
+        // Audience-specific Resource so future staff-only fields (admin_notes,
+        // suppression source, etc.) land cleanly without leaking to brands (#API-3).
+        $page->through(fn (EmailSubscription $sub) => StaffEmailSubscriptionResource::make($sub)->resolve());
 
         return $this->success($this->paginatedResponse($page, 'subscriptions', [
             'filters' => [

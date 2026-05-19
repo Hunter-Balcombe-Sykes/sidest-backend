@@ -25,6 +25,10 @@ class FanOutBrandStatusNotificationJob implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 3;
 
+    // Surface deterministic failures fast — fail after 2 consecutive throws
+    // instead of burning the full backoff window before Horizon alerts.
+    public int $maxExceptions = 2;
+
     public int $backoff = 30;
 
     public int $timeout = 120;
@@ -39,9 +43,9 @@ class FanOutBrandStatusNotificationJob implements ShouldBeUnique, ShouldQueue
         return $this->brandProfessionalId.':'.$this->brandStatus;
     }
 
-    // Bound batch size so any one Redis pipeline write stays predictable.
-    // Shared with SendStaffBroadcastEmailsJob — keep in sync if changed.
-    private const BATCH_CHUNK_SIZE = 200;
+    // Batch size sourced from config('partna.notifications.batch_chunk_size')
+    // so this and SendStaffBroadcastEmailsJob stay in lockstep without manual
+    // sync (#CFG-3).
 
     public function __construct(
         public readonly string $brandProfessionalId,
@@ -83,7 +87,7 @@ class FanOutBrandStatusNotificationJob implements ShouldBeUnique, ShouldQueue
                 // individually. allowFailures() preserves the per-job retry semantics
                 // SendBrandStatusNotificationJob's $tries=3 promises — without it, a
                 // single failure cancels remaining (still-pending) jobs in the batch.
-                foreach (array_chunk($jobs, self::BATCH_CHUNK_SIZE) as $chunk) {
+                foreach (array_chunk($jobs, (int) config('partna.notifications.batch_chunk_size', 200)) as $chunk) {
                     $batch = Bus::batch($chunk)
                         ->onQueue('notifications')
                         ->name('brand-status-fanout:'.$this->brandProfessionalId)

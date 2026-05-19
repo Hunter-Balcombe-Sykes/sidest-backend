@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\HandlesSearchQueries;
 use App\Http\Controllers\Concerns\NormalizesPerPage;
 use App\Http\Controllers\Concerns\ResolveCurrentProfessional;
 use App\Http\Controllers\Concerns\ReturnsPaginatedResponse;
+use App\Http\Resources\ProfessionalEmailSubscriptionResource;
 use App\Models\Core\Notifications\EmailSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -56,6 +57,10 @@ class ProfessionalEmailSubscriptionController extends ApiController
         }
 
         $page = $query->paginate($perPage)->appends($request->query());
+        // Route each row through the audience-specific Resource so the field
+        // set is an explicit allowlist (#API-3). $hidden on the model still
+        // strips token/IP/UA defensively, but the Resource is the contract.
+        $page->through(fn (EmailSubscription $sub) => ProfessionalEmailSubscriptionResource::make($sub)->resolve());
 
         return $this->success($this->paginatedResponse($page, 'subscriptions', [
             'filters' => [

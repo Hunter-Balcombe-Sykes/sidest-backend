@@ -24,6 +24,10 @@ class NudgeStuckOnboardingJob implements ShouldQueue
 
     public int $tries = 3;
 
+    // Surface deterministic failures fast — fail after 2 consecutive throws
+    // instead of burning the full backoff window before Horizon alerts.
+    public int $maxExceptions = 2;
+
     public int $backoff = 60;
 
     public int $timeout = 300;

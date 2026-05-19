@@ -26,12 +26,13 @@ class NotificationListingService
      */
     public function index(string $professionalId, int $limit, bool $includeDismissed): array
     {
-        // 15s TTL: short enough that a server-side notification publish
+        // 15s default TTL: short enough that a server-side notification publish
         // surfaces within one poll cycle of the dashboard bell. markRead and
-        // dismiss bust this key explicitly.
+        // dismiss bust this key explicitly. Tunable via
+        // config('partna.notifications.listing_cache_ttl_seconds') (#CFG-4).
         return $this->cache->rememberLocked(
             $this->cacheKey($professionalId, $limit, $includeDismissed),
-            15,
+            (int) config('partna.notifications.listing_cache_ttl_seconds', 15),
             fn () => $this->buildIndexPayload($professionalId, $limit, $includeDismissed),
         );
     }

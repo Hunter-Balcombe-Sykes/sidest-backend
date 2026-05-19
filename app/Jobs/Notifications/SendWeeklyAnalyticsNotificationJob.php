@@ -20,6 +20,10 @@ class SendWeeklyAnalyticsNotificationJob implements ShouldQueue
 
     public int $tries = 2;
 
+    // Surface deterministic failures fast — fail after the first throw instead
+    // of burning the full backoff window before Horizon alerts.
+    public int $maxExceptions = 1;
+
     public int $backoff = 60;
 
     public int $timeout = 300;

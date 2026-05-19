@@ -6,6 +6,7 @@ use App\Models\BaseModel;
 use App\Models\Core\Professional\Professional;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 // V2: Marketing email opt-in/out record per professional+email. Source of truth for consent; caches status on Customer for performance.
@@ -87,11 +88,20 @@ class EmailSubscription extends BaseModel
     {
         static::saved(function (self $subscription) {
             if ($subscription->list_key === 'marketing' && $subscription->professional_id && $subscription->email) {
-                \App\Jobs\Notifications\SyncCustomerMarketingOptInJob::dispatch(
-                    (string) $subscription->professional_id,
-                    (string) $subscription->email,
-                    $subscription->status === 'subscribed',
-                );
+                // afterCommit so the job never enqueues if the surrounding
+                // transaction rolls back — avoids a wasted queue slot and a
+                // confusing "customer not found" no-op log in Horizon (#JOB-5).
+                $professionalId = (string) $subscription->professional_id;
+                $email = (string) $subscription->email;
+                $isSubscribed = $subscription->status === 'subscribed';
+
+                DB::afterCommit(function () use ($professionalId, $email, $isSubscribed) {
+                    \App\Jobs\Notifications\SyncCustomerMarketingOptInJob::dispatch(
+                        $professionalId,
+                        $email,
+                        $isSubscribed,
+                    );
+                });
             }
         });
     }
