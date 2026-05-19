@@ -502,7 +502,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SCHEMA-2** · P2 — `Schema::hasColumn('email_subscriptions', 'email_lc')` checks the wrong schema — may resolve against a different table in the `search_path`
+- [x] **#SCHEMA-2** · P2 — `Schema::hasColumn('email_subscriptions', 'email_lc')` checks the wrong schema — may resolve against a different table in the `search_path`
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEmailSubscriptionController.php:283-299 (emailLcColumnExists method)
     - **Affects:** Public newsletter signup flow — if `email_subscriptions` exists in any earlier `search_path` schema, the check returns true for the wrong table and the controller sets `email_lc` on the wrong Eloquent model.
     - **Effort:** S (~0.5–1h)

@@ -11,7 +11,6 @@ use App\Models\Core\Professional\Customer;
 use App\Services\PublicSite\PublicSiteResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 
 // V2: Newsletter signup with name inference from email and customer upsert.
 class PublicEmailSubscriptionController extends ApiController
@@ -85,9 +84,7 @@ class PublicEmailSubscriptionController extends ApiController
             }
         }
 
-        if ($this->emailLcColumnExists()) {
-            $subscription->email_lc = $email;
-        }
+        $subscription->email_lc = $email;
 
         $subscription->markSubscribed([
             'source' => 'site_subscribe',
@@ -239,16 +236,4 @@ class PublicEmailSubscriptionController extends ApiController
         return ucfirst($first).' '.ucfirst($last);
     }
 
-    private function emailLcColumnExists(): bool
-    {
-        static $cached = null;
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        $cached = Schema::hasColumn('email_subscriptions', 'email_lc')
-            || Schema::hasColumn('core.email_subscriptions', 'email_lc');
-
-        return $cached;
-    }
 }
