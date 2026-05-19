@@ -527,7 +527,8 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SCHEMA-3** · P2 — `LOWER(email)` WHERE clauses on `core.customers` lack a functional index — full table scan on every contact capture, GDPR redact, and export
+- [x] **#SCHEMA-3** · P2 — `LOWER(email)` WHERE clauses on `core.customers` lack a functional index — full table scan on every contact capture, GDPR redact, and export
+    - **Resolution (2026-05-19):** No-op — the v2 baseline already creates two functional indices: `customers_professional_email_unique ON (professional_id, lower(email)) WHERE email IS NOT NULL` (line 434) and `customers_professional_email_search_idx ON (professional_id, lower(email)) WHERE email IS NOT NULL AND deleted_at IS NULL` (line 437). The audit draft was stale.
     - **Where:** app/Services/Customers/ContactCaptureService.php (captureContact), app/Jobs/Shopify/Gdpr/RedactCustomerJob.php (handle), app/Jobs/Shopify/Gdpr/ExportCustomerDataJob.php (gatherExportData)
     - **Affects:** Contact capture latency on all Shopify order webhooks, Square bookings, and site leads, plus GDPR redact throughput. Each call runs a full per-professional table scan if no functional index exists on `LOWER(email)`.
     - **Effort:** M (~2–4h)
@@ -548,7 +549,8 @@ Three key verification wins from the migration files:
         //     WHERE (email IS NOT NULL);
         ```
 
-- [ ] **#SCHEMA-4** · P2 — `notifications.notifications.type` and `severity` columns have no CHECK constraint — arbitrary values accepted at DB level
+- [x] **#SCHEMA-4** · P2 — `notifications.notifications.type` and `severity` columns have no CHECK constraint — arbitrary values accepted at DB level
+    - **Resolution (2026-05-19):** Added `notifications_type_check` in `supabase/migrations/202605190000004_add_notifications_check_constraints.sql`. `severity` already had `notifications_severity_check` from the v2 baseline line 964 — only `type` needed adding.
     - **Where:** app/Models/Core/Notifications/Notification.php:23-28 (FRONTEND_TYPES constant) — no corresponding CHECK in `202605190000002_add_enum_check_constraints.sql`
     - **Affects:** Data integrity — a buggy or direct INSERT can store arbitrary type strings, breaking the frontend's type-to-icon mapping and `normalizeFrontendType()` normalization.
     - **Effort:** S (~0.5–1h)
@@ -576,7 +578,8 @@ Three key verification wins from the migration files:
         // for notifications.notifications.type or .severity
         ```
 
-- [ ] **#SCHEMA-5** · P2 — `notification_email_policies.mode` has no CHECK constraint — mistyped mode values silently disable policies
+- [x] **#SCHEMA-5** · P2 — `notification_email_policies.mode` has no CHECK constraint — mistyped mode values silently disable policies
+    - **Resolution (2026-05-19):** No-op — the v2 baseline (line 1020) already has `CHECK (mode IN ('default', 'force_on', 'force_off'))` inline on the column. The audit draft was stale.
     - **Where:** app/Models/Core/Notifications/NotificationEmailPolicy.php — no CHECK in any verified migration
     - **Affects:** Email delivery correctness — a mistyped mode value (e.g. `'force_on '` with trailing space, or `'force-on'`) silently falls through the `computeResolvedMap` resolution chain and defaults to `true`, effectively ignoring a `force_off` policy.
     - **Effort:** S (~0.5–1h)
@@ -594,7 +597,7 @@ Three key verification wins from the migration files:
         // No CHECK constraint in any migration for this column
         ```
 
-- [ ] **#OBS-3** · P2 — `CommerceNotificationService` log context missing `event_key` and `booking_id` on failure — can't trace which booking lost its notification
+- [x] **#OBS-3** · P2 — `CommerceNotificationService` log context missing `event_key` and `booking_id` on failure — can't trace which booking lost its notification
     - **Where:** app/Services/Notifications/CommerceNotificationService.php:104-108
     - **Affects:** Booking completion flow. When the notification publish or milestone check fails, Nightwatch sees the exception (via `report()`) but the warning log only carries `professional_id` — ops can't tell which specific booking triggered the failure without additional queries.
     - **Effort:** S (~0.5–1h)
@@ -615,7 +618,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#OBS-4** · P2 — `SendStaffBroadcastEmailsJob` returns silently when the notification is not found — broadcast silently never fans out
+- [x] **#OBS-4** · P2 — `SendStaffBroadcastEmailsJob` returns silently when the notification is not found — broadcast silently never fans out
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailsJob.php:43-46
     - **Affects:** Staff broadcast email fan-outs. If the notification is deleted between dispatch and execution, the entire broadcast silently does nothing — no log, no Horizon failure, no Nightwatch event.
     - **Effort:** S (~0.5–1h)
@@ -632,7 +635,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#OBS-5** · P2 — `SendStaffBroadcastEmailToSubscriberJob` returns silently when notification or subscription is not found
+- [x] **#OBS-5** · P2 — `SendStaffBroadcastEmailToSubscriberJob` returns silently when notification or subscription is not found
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailToSubscriberJob.php:53-60
     - **Affects:** Individual subscriber deliveries within a staff broadcast batch. In a batch with `allowFailures()`, a silent return is indistinguishable from a successful send — the batch shows "completed" with zero failures even if emails were not sent.
     - **Effort:** S (~0.5–1h)
@@ -653,7 +656,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#JOB-2** · P2 — `FanOutBrandStatusNotificationJob` missing `ShouldBeUnique` — concurrent runs dispatch double batches
+- [x] **#JOB-2** · P2 — `FanOutBrandStatusNotificationJob` missing `ShouldBeUnique` — concurrent runs dispatch double batches
     - **Where:** app/Jobs/Notifications/FanOutBrandStatusNotificationJob.php:33 (class declaration)
     - **Affects:** Queue resource — every connected affiliate gets double `SendBrandStatusNotificationJob` instances when the fan-out runs twice concurrently. The leaf job's dedupe key prevents duplicate notification rows, but double the queue work still runs.
     - **Effort:** S (~0.5–1h)
@@ -673,7 +676,7 @@ Three key verification wins from the migration files:
             // No ShouldBeUnique, no uniqueId()
         ```
 
-- [ ] **#JOB-3** · P2 — `SendStaffBroadcastEmailsJob` missing `ShouldBeUnique` — concurrent runs double the per-subscriber batch fan-out
+- [x] **#JOB-3** · P2 — `SendStaffBroadcastEmailsJob` missing `ShouldBeUnique` — concurrent runs double the per-subscriber batch fan-out
     - **Where:** app/Jobs/Notifications/SendStaffBroadcastEmailsJob.php:31 (class declaration)
     - **Affects:** Queue throughput — subscribers get two `SendStaffBroadcastEmailToSubscriberJob` instances each in the `mail` queue. The leaf job's `insertOrIgnore` on `broadcast_email_receipts` prevents duplicate emails (backed by `PRIMARY KEY`), but processing cost doubles.
     - **Effort:** S (~0.5–1h)
