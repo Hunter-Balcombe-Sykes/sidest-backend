@@ -4,6 +4,7 @@ namespace App\Jobs\Notifications;
 
 use App\Models\Core\Professional\Professional;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Log;
 // Uses Bus::batch() so each sub-chunk of jobs shares one Redis pipeline write
 // instead of one write per job, protecting against unbounded queue pressure
 // as affiliate counts grow.
-class FanOutBrandStatusNotificationJob implements ShouldQueue
+class FanOutBrandStatusNotificationJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -27,6 +28,16 @@ class FanOutBrandStatusNotificationJob implements ShouldQueue
     public int $backoff = 30;
 
     public int $timeout = 120;
+
+    // Prevent concurrent fan-out for the same brand+status transition. The leaf
+    // job's dedupe key blocks duplicate notification rows, but without this a
+    // concurrent dispatch doubles the per-affiliate queue work. Keyed on both
+    // brand and status so a brand flipping back and forth still fans out each
+    // distinct transition.
+    public function uniqueId(): string
+    {
+        return $this->brandProfessionalId.':'.$this->brandStatus;
+    }
 
     // Bound batch size so any one Redis pipeline write stays predictable.
     // Shared with SendStaffBroadcastEmailsJob — keep in sync if changed.
