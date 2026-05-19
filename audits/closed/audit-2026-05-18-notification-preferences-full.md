@@ -778,7 +778,7 @@ Three key verification wins from the migration files:
 
 ## P3 — Nice to have
 
-- [ ] **#SEC-4** · P3 — `PublicEmailUnsubscribeController` accepts any token string without minimum-length validation — inconsistent with `PublicMarketingPreferenceController`
+- [x] **#SEC-4** · P3 — `PublicEmailUnsubscribeController` accepts any token string without minimum-length validation — inconsistent with `PublicMarketingPreferenceController`
     - **Where:** app/Http/Controllers/Api/PublicSite/PublicEmailUnsubscribeController.php:11-23
     - **Affects:** Negligible — an empty or trivially short token hits the database but never matches a real 48-character unsubscribe token. The inconsistency is the primary concern.
     - **Effort:** S (~0.5–1h)
@@ -795,7 +795,7 @@ Three key verification wins from the migration files:
             // no strlen($token) guard — contrast with PublicMarketingPreferenceController
         ```
 
-- [ ] **#JOB-4** · P3 — All retryable jobs lack `$maxExceptions` — deterministic failures exhaust the full retry window before surfacing
+- [x] **#JOB-4** · P3 — All retryable jobs lack `$maxExceptions` — deterministic failures exhaust the full retry window before surfacing
     - **Where:** app/Jobs/Notifications/* and app/Jobs/Shopify/Gdpr/* (every job with `$tries >= 2`)
     - **Affects:** Incident response time — a job that throws on every attempt takes the full `$backoff` window to surface as failed in Horizon.
     - **Effort:** S (~0.5–1h)
@@ -811,7 +811,7 @@ Three key verification wins from the migration files:
         // public int $maxExceptions — absent, defaults to $tries (3)
         ```
 
-- [ ] **#JOB-5** · P3 — `EmailSubscription::saved` hook dispatches `SyncCustomerMarketingOptInJob` outside transaction safety
+- [x] **#JOB-5** · P3 — `EmailSubscription::saved` hook dispatches `SyncCustomerMarketingOptInJob` outside transaction safety
     - **Where:** app/Models/Core/Notifications/EmailSubscription.php:105-112
     - **Affects:** `SyncCustomerMarketingOptInJob` may run against a rolled-back `EmailSubscription` row, wasting a queue slot. The job degrades gracefully (returns early if no customer found), so no data corruption occurs.
     - **Effort:** S (~0.5–1h)
@@ -834,7 +834,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#API-2** · P3 — Notification listing uses `limit`+`has_more` pagination while every other list endpoint uses page-based `paginate()`
+- [x] **#API-2** · P3 — Notification listing uses `limit`+`has_more` pagination while every other list endpoint uses page-based `paginate()`
     - **Where:** app/Services/Notifications/NotificationListingService.php:89-102, app/Http/Controllers/Api/Professional/Notifications/NotificationController.php:27-31
     - **Affects:** Frontend developers — different pagination logic is required for notifications vs. every other list endpoint.
     - **Effort:** M (~2–4h)
@@ -852,7 +852,7 @@ Three key verification wins from the migration files:
         return $this->success($this->paginatedResponse($page, 'subscriptions', [...]));
         ```
 
-- [ ] **#API-3** · P3 — No audience-specific Resource class for `EmailSubscription` — Professional and Staff endpoints share raw model serialisation
+- [x] **#API-3** · P3 — No audience-specific Resource class for `EmailSubscription` — Professional and Staff endpoints share raw model serialisation
     - **Where:** app/Http/Controllers/Api/Professional/Notifications/ProfessionalEmailSubscriptionController.php:51-52, app/Http/Controllers/Api/Staff/StaffSite/StaffEmailSubscriberController.php:46-47
     - **Affects:** Future development — adding a Staff-only field (e.g. `admin_notes`) has no safe place to land; it either leaks to Professionals or hides from Staff.
     - **Effort:** M (~2–4h)
@@ -871,7 +871,7 @@ Three key verification wins from the migration files:
         return $this->success($this->paginatedResponse($page, 'subscriptions', [...]));
         ```
 
-- [ ] **#CFG-3** · P3 — `BATCH_CHUNK_SIZE` constant duplicated across two fan-out jobs with sync-warning comments
+- [x] **#CFG-3** · P3 — `BATCH_CHUNK_SIZE` constant duplicated across two fan-out jobs with sync-warning comments
     - **Where:** app/Jobs/Notifications/FanOutBrandStatusNotificationJob.php:37, app/Jobs/Notifications/SendStaffBroadcastEmailsJob.php:37
     - **Affects:** Redis pipeline write load — if only one constant is changed, the two fan-out paths diverge in batch size silently.
     - **Effort:** S (~0.5–1h)
@@ -890,7 +890,7 @@ Three key verification wins from the migration files:
         private const BATCH_CHUNK_SIZE = 200;
         ```
 
-- [ ] **#CFG-4** · P3 — Notification listing cache TTL hardcoded to `15` in `NotificationListingService`
+- [x] **#CFG-4** · P3 — Notification listing cache TTL hardcoded to `15` in `NotificationListingService`
     - **Where:** app/Services/Notifications/NotificationListingService.php:54
     - **Affects:** In-app notification bell polling frequency — tuning requires a code change and redeploy.
     - **Effort:** S (~0.5–1h)
