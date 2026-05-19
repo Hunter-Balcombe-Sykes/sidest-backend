@@ -36,11 +36,23 @@ class SendStaffBroadcastEmailToSubscriberJob implements ShouldQueue
     {
         $notification = Notification::query()->find($this->notificationId);
         if (! $notification) {
+            // Silent return inside an allowFailures() batch is indistinguishable
+            // from success — log so we can correlate dropped sends to the cause.
+            Log::warning('SendStaffBroadcastEmailToSubscriberJob: notification not found', [
+                'notification_id' => $this->notificationId,
+                'subscription_id' => $this->subscriptionId,
+            ]);
+
             return;
         }
 
         $sub = EmailSubscription::query()->find($this->subscriptionId);
         if (! $sub) {
+            Log::warning('SendStaffBroadcastEmailToSubscriberJob: subscription not found', [
+                'notification_id' => $this->notificationId,
+                'subscription_id' => $this->subscriptionId,
+            ]);
+
             return;
         }
 
