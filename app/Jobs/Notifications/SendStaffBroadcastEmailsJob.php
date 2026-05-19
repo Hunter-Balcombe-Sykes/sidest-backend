@@ -5,6 +5,7 @@ namespace App\Jobs\Notifications;
 use App\Models\Core\Notifications\EmailSubscription;
 use App\Models\Core\Notifications\Notification;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\Log;
 // Fans out staff broadcast emails to all marketing-list subscribers using Bus::batch()
 // so each sub-chunk of jobs shares one Redis pipeline write instead of one write per job —
 // the marketing list grows unboundedly with sign-ups, so this is the urgent batch fix.
-class SendStaffBroadcastEmailsJob implements ShouldQueue
+class SendStaffBroadcastEmailsJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -24,6 +25,15 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
     public array $backoff = [10, 30, 60];
 
     public int $timeout = 120;
+
+    // Prevent concurrent fan-out for the same notification. The leaf job's
+    // broadcast_email_receipts PK already blocks duplicate sends, but without this
+    // a concurrent dispatch doubles the per-subscriber queue work. Lock auto-releases
+    // when the job finishes; no explicit uniqueFor needed beyond the default.
+    public function uniqueId(): string
+    {
+        return 'staff-broadcast:'.$this->notificationId;
+    }
 
     // Bound batch size so any one Redis pipeline write stays predictable.
     // Shared with FanOutBrandStatusNotificationJob — keep in sync if changed.
@@ -42,6 +52,13 @@ class SendStaffBroadcastEmailsJob implements ShouldQueue
     {
         $notification = Notification::query()->find($this->notificationId);
         if (! $notification) {
+            // Notification deleted between dispatch and run — broadcast aborted.
+            // Log so Nightwatch/ops can distinguish this from a successful no-op.
+            Log::warning('SendStaffBroadcastEmailsJob: notification not found, broadcast aborted', [
+                'notification_id' => $this->notificationId,
+                'list_key' => $this->listKey,
+            ]);
+
             return;
         }
 
