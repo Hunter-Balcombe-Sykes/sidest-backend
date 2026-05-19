@@ -85,17 +85,21 @@ class UpdateSiteAction
                     }
 
                     if (! empty($site->subdomain)) {
+                        // Nested transaction = SAVEPOINT on Postgres. Without this, a 23505
+                        // duplicate error aborts the outer transaction even when caught in PHP.
                         try {
-                            SiteSubdomainAlias::query()->create([
-                                'site_id' => $site->id,
-                                'subdomain' => $site->subdomain,
-                                'created_at' => now(),
-                            ]);
+                            DB::transaction(function () use ($site) {
+                                SiteSubdomainAlias::query()->create([
+                                    'site_id' => $site->id,
+                                    'subdomain' => $site->subdomain,
+                                    'created_at' => now(),
+                                ]);
+                            });
                         } catch (QueryException $e) {
                             if ($e->getCode() !== '23505') {
                                 throw $e;
                             }
-                            // Ignore duplicate alias writes; uniqueness is enforced in the DB.
+                            // Duplicate alias is fine — uniqueness enforced in DB.
                         }
                     }
 
@@ -108,17 +112,19 @@ class UpdateSiteAction
                     $oldHandle = $professional->handle;
                     if (! empty($oldHandle) && strtolower($oldHandle) !== $incoming) {
                         try {
-                            ProfessionalHandleAlias::query()->create([
-                                'professional_id' => $professional->id,
-                                'handle' => $oldHandle,
-                                'created_at' => now(),
-                                'updated_at' => now(),
-                            ]);
+                            DB::transaction(function () use ($professional, $oldHandle) {
+                                ProfessionalHandleAlias::query()->create([
+                                    'professional_id' => $professional->id,
+                                    'handle' => $oldHandle,
+                                    'created_at' => now(),
+                                    'updated_at' => now(),
+                                ]);
+                            });
                         } catch (QueryException $e) {
                             if ($e->getCode() !== '23505') {
                                 throw $e;
                             }
-                            // Ignore duplicate alias writes; uniqueness is enforced in the DB.
+                            // Duplicate alias is fine — uniqueness enforced in DB.
                         }
                     }
                     $professional->forceFill([
