@@ -122,6 +122,13 @@ class AppServiceProvider extends ServiceProvider
             throw new \RuntimeException('PARTNA_THROTTLE_ENABLED must not be false in production.');
         }
 
+        // Refuse to boot in production with an empty public_domain — an unset
+        // PARTNA_PUBLIC_DOMAIN would silently break every public-site route by
+        // producing a domain pattern of "{subdomain}." that matches nothing.
+        if (app()->isProduction() && empty(config('partna.public_domain'))) {
+            throw new \RuntimeException('PARTNA_PUBLIC_DOMAIN must be configured in production.');
+        }
+
         // Refuse to boot outside tests with a missing Shopify API version — a blank
         // SHOPIFY_API_VERSION would silently fall back to a stale/deprecated version.
         if (! app()->environment('testing') && empty(config('services.shopify.api_version'))) {

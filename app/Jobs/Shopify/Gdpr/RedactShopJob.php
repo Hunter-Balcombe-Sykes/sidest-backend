@@ -31,7 +31,7 @@ class RedactShopJob implements ShouldQueue
     {
         // redis_gdpr connection has retry_after=660 so Redis won't re-queue
         // this job while the 600s chunkById sweep is still running.
-        $this->onConnection('redis_gdpr')->onQueue(config('partna.gdpr.queue'));
+        $this->onConnection('redis_gdpr')->onQueue(config('partna.gdpr.queue', 'gdpr'));
     }
 
     public function backoff(): array

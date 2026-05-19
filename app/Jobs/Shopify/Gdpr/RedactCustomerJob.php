@@ -29,7 +29,7 @@ class RedactCustomerJob implements ShouldQueue
 
     public function __construct(public string $gdprRequestId)
     {
-        $this->onQueue(config('partna.gdpr.queue'));
+        $this->onQueue(config('partna.gdpr.queue', 'gdpr'));
     }
 
     public function backoff(): array

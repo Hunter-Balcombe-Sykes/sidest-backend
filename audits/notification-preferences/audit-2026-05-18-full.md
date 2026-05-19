@@ -480,7 +480,7 @@ Three key verification wins from the migration files:
         }
         ```
 
-- [ ] **#SCALE-2** · P2 — `DataExportPayloadBuilder` loads unbounded row sets into memory — OOM risk for mature professionals
+- [x] **#SCALE-2** · P2 — `DataExportPayloadBuilder` loads unbounded row sets into memory — OOM risk for mature professionals
     - **Where:** app/Services/Professional/DataExport/DataExportPayloadBuilder.php:101-103, 112-115, 161-168, 172-180
     - **Affects:** GDPR Article 15 right-of-access exports. A large-brand export (5K+ customers, 10K+ orders, 5K+ subscribers) can exhaust PHP memory, causing the export to fail and violating the legal obligation to deliver.
     - **Effort:** M (~2–4h)
@@ -730,7 +730,7 @@ Three key verification wins from the migration files:
         ];
         ```
 
-- [ ] **#CFG-1** · P2 — `config('partna.public_domain')` has no fallback default — missing env breaks every public-site route
+- [x] **#CFG-1** · P2 — `config('partna.public_domain')` has no fallback default — missing env breaks every public-site route
     - **Where:** routes/api/publicSite.php:15
     - **Affects:** All public-site routes (site rendering, bookings, leads, enquiries, subscribe/unsubscribe). An empty `public_domain` config produces an invalid domain group pattern that matches nothing, silently breaking the entire public surface.
     - **Effort:** S (~0.5–1h)
@@ -750,7 +750,7 @@ Three key verification wins from the migration files:
         ], function () {
         ```
 
-- [ ] **#CFG-2** · P2 — `config('partna.gdpr.queue')` has no fallback in three GDPR job constructors — missing config silently routes compliance jobs to `default`
+- [x] **#CFG-2** · P2 — `config('partna.gdpr.queue')` has no fallback in three GDPR job constructors — missing config silently routes compliance jobs to `default`
     - **Where:** app/Jobs/Shopify/Gdpr/ExportCustomerDataJob.php:37, RedactCustomerJob.php:33, RedactShopJob.php:37
     - **Affects:** Shopify GDPR compliance jobs. Missing config silently merges these jobs into the `default` queue instead of the isolated GDPR queue, defeating the isolation and retry-policy separation.
     - **Effort:** S (~0.5–1h)

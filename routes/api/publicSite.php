@@ -10,7 +10,11 @@ use Illuminate\Support\Facades\Route;
 
 // TODO(v1): all routes in this file should be prefixed /v1/ once frontend is ready for the migration
 
-$publicDomain = config('partna.public_domain');
+// Fallback to 'partna.au' so a missing/typo'd PARTNA_PUBLIC_DOMAIN env doesn't
+// silently produce an unmatched domain pattern that breaks every public route.
+// AppServiceProvider::boot() additionally hard-fails the deploy in production
+// if the config resolves to an empty string.
+$publicDomain = config('partna.public_domain') ?: 'partna.au';
 
 // Public/Anon
 Route::group([
