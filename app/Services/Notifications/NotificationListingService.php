@@ -2,6 +2,7 @@
 
 namespace App\Services\Notifications;
 
+use App\Http\Resources\NotificationListingResource;
 use App\Models\Core\Notifications\Notification;
 use App\Services\Cache\CacheLockService;
 use Illuminate\Support\Facades\Cache;
@@ -139,9 +140,11 @@ class NotificationListingService
         return [
             'unread_count' => $unreadCount,
             'has_more' => $hasMore,
-            // Re-index to a plain array so JSON encodes as `[...]` not `{0:...}`
-            // after the trailing limit+1 row was sliced off above.
-            'notifications' => $rows->values()->all(),
+            // Route every row through NotificationListingResource so the field
+            // set is an explicit allowlist — adding a column to the select()
+            // above no longer auto-exposes it to the API. Re-indexed to a plain
+            // array so JSON encodes as `[...]` not `{0:...}`.
+            'notifications' => NotificationListingResource::collection($rows->values())->resolve(),
         ];
     }
 

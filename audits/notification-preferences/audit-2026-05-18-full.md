@@ -696,7 +696,7 @@ Three key verification wins from the migration files:
             // No ShouldBeUnique, no uniqueId()
         ```
 
-- [ ] **#DINT-2** · P2 — No scheduled job enforces the 30-day soft-delete retention policy — trashed rows accumulate indefinitely
+- [x] **#DINT-2** · P2 — No scheduled job enforces the 30-day soft-delete retention policy — trashed rows accumulate indefinitely _(already implemented: `app/Console/Commands/PurgeSoftDeleted.php` sweeps Customer, Service, SiteMedia, Enquiry, ServiceCategory, and pending-deletion Professionals; scheduled daily at 03:20 UTC in `routes/console.php:63-68`. FeatureFlag is the only other `SoftDeletes` model and has its own `feature-flags:prune-expired` scheduler at 03:30. Auditor false-positive — missed the Artisan command in `app/Console/Commands/`.)_
     - **Where:** app/Jobs/ and app/Console/ (absence)
     - **Affects:** All models using `SoftDeletes` (professionals, customers, sites, etc.). Soft-deleted rows accumulate indefinitely, violating the documented retention policy and slowly bloating storage and index scans.
     - **Effort:** M (~2–4h)
@@ -709,7 +709,7 @@ Three key verification wins from the migration files:
     - **Evidence:**
         No purge/prune job found for soft-deleted records across `app/Jobs/` (only `PurgeAffiliateProductSelectionsJob` for Shopify product selections — unrelated). `CLAUDE.md` documents the 30-day policy; no enforcement mechanism exists.
 
-- [ ] **#API-1** · P2 — Notification listing returns raw `stdClass` rows directly in the API response, bypassing the Resource layer
+- [x] **#API-1** · P2 — Notification listing returns raw `stdClass` rows directly in the API response, bypassing the Resource layer
     - **Where:** app/Services/Notifications/NotificationListingService.php:103-126 (buildIndexPayload)
     - **Affects:** All callers of `GET /me/notifications` — both the Professional dashboard bell and the Staff-on-behalf-of endpoint receive raw DB column names directly in JSON.
     - **Effort:** M (~2–4h)
