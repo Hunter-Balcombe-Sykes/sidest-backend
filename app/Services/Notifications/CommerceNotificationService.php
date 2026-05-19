@@ -45,14 +45,18 @@ class CommerceNotificationService
      */
     public function notifyBookingCompleted(array $context): void
     {
+        // Pre-extract identifiers so the catch block can log which booking failed
+        // (Nightwatch sees the exception, but ops needs the booking key to correlate).
+        $bookingId = trim((string) ($context['booking_id'] ?? ''));
+        $eventId = trim((string) ($context['booking_event_id'] ?? ''));
+        $eventKey = $eventId !== '' ? $eventId : ($bookingId !== '' ? $bookingId : null);
+
         try {
             $professionalId = trim((string) ($context['professional_id'] ?? ''));
             if ($professionalId === '') {
                 return;
             }
 
-            $eventId = trim((string) ($context['booking_event_id'] ?? ''));
-            $bookingId = trim((string) ($context['booking_id'] ?? ''));
             $serviceName = trim((string) ($context['service_name'] ?? ''));
             $customerName = trim((string) ($context['customer_name'] ?? ''));
             $amountPaidCents = max(0, (int) ($context['amount_paid_cents'] ?? 0));
@@ -64,7 +68,7 @@ class CommerceNotificationService
             $amountLabel = Money::format($amountPaidCents, $currencyCode);
             $serviceLabel = $serviceName !== '' ? $serviceName : 'Service';
             $customerLabel = $customerName !== '' ? $customerName : 'Customer';
-            $eventKey = $eventId !== '' ? $eventId : ($bookingId !== '' ? $bookingId : Str::uuid()->toString());
+            $eventKey = $eventKey ?? Str::uuid()->toString();
 
             $affiliateName = (string) (DB::table('core.professionals')
                 ->where('id', $professionalId)
@@ -116,6 +120,8 @@ class CommerceNotificationService
             report($e);
             Log::warning('Booking notifications failed', [
                 'professional_id' => $context['professional_id'] ?? null,
+                'booking_id' => $bookingId !== '' ? $bookingId : null,
+                'event_key' => $eventKey,
                 'message' => $e->getMessage(),
             ]);
         }
